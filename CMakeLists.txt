@@ -22,17 +22,23 @@ function(target_cxx23 tgt)
     set_property(TARGET ${tgt} PROPERTY CXX_EXTENSIONS ON)
 endfunction()
 
+
+add_library(${PREF}WLGena.headers INTERFACE)
+target_include_directories(${PREF}WLGena.headers INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+
 add_library(${PREF}WLGena.static STATIC)
 target_cxx23(${PREF}WLGena.static)
 
 target_sources(${PREF}WLGena.static PRIVATE
-    Gena.cc
+    GenaMain.cc
     Parser.cc
 )
 
-target_link_libraries(${PREF}WLGena.static
-    PRIVATE
-        ${PREF}libexpat.headers
+target_link_libraries(${PREF}WLGena.static PRIVATE
+    ${PREF}libexpat.headers
+    ${PREF}WLGena.headers
 )
 
 if(NOT TARGET)
@@ -43,6 +49,7 @@ endif()
 
 target_sources(${PREF}WLGena PRIVATE Main.cc)
 target_link_libraries(${PREF}WLGena PRIVATE
+    ${PREF}WLGena.headers
     ${PREF}WLGena.static
     ${PREF}libexpat
 )

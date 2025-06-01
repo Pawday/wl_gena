@@ -5,7 +5,7 @@
 
 #include <cstdlib>
 
-#include "Gena.hh"
+#include "wl_gena/GenaMain.hh"
 
 int main(int argc, char **argv)
 {

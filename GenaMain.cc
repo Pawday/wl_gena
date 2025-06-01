@@ -16,8 +16,9 @@
 #include <cstddef>
 #include <cstdlib>
 
+#include "wl_gena/GenaMain.hh"
+
 #include "Format.hh"
-#include "Gena.hh"
 #include "Parser.hh"
 #include "Types.hh"
 
