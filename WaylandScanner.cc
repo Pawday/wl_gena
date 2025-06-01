@@ -4,7 +4,6 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <optional>
 #include <ranges>
 #include <sstream>
 #include <string>
@@ -17,11 +16,10 @@
 #include <cstddef>
 #include <cstdlib>
 
-#include "Application.hh"
-
 #include "Format.hh"
 #include "ParseProtocol.hh"
 #include "Types.hh"
+#include "WaylandScanner.hh"
 
 namespace {
 
@@ -347,20 +345,11 @@ void process_enums_mode(const EnumsModeArgs &args)
 
 } // namespace
 
-int Application::main()
+int wl_gena_main(const std::vector<std::string> argv)
 {
-    auto args = get_libc_args().value();
-
-    if (args.argv.size() == 0) {
-        std::cout << "Hacked args";
-        return EXIT_FAILURE;
-    }
-
-    args.argv.erase(args.argv.begin());
-
     std::vector<std::string> failue_msgs;
 
-    auto json_mode_args_op = parse_json_mode_args(args.argv);
+    auto json_mode_args_op = parse_json_mode_args(argv);
     if (json_mode_args_op) {
         process_json_mode(json_mode_args_op.value());
         return EXIT_SUCCESS;
@@ -369,7 +358,7 @@ int Application::main()
         std::format("JSON Mode: [{}]", json_mode_args_op.error());
     failue_msgs.emplace_back(std::move(json_mode_message));
 
-    auto enums_mode_args_op = parse_enums_mode(args.argv);
+    auto enums_mode_args_op = parse_enums_mode(argv);
     if (enums_mode_args_op) {
         process_enums_mode(enums_mode_args_op.value());
         return EXIT_SUCCESS;
