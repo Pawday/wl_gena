@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.28)
 
 project("${PREF}wl_gena")
 
-
-
 if(NOT TARGET ${PREF}libexpat)
     if(TARGET ${PREF}libexpat.headers)
         message(FATAL_ERROR "Target ${PREF}libexpat.headers exist but [${PREF}libexpat] DOES NOT")
@@ -24,26 +22,27 @@ function(target_cxx23 tgt)
     set_property(TARGET ${tgt} PROPERTY CXX_EXTENSIONS ON)
 endfunction()
 
-add_library(${PREF}WaylandScanner.static STATIC)
-target_cxx23(${PREF}WaylandScanner.static)
+add_library(${PREF}WLGena.static STATIC)
+target_cxx23(${PREF}WLGena.static)
 
-target_sources(${PREF}WaylandScanner.static PRIVATE
-    WaylandScanner.cc
-    WaylandProtoParser.cc
+target_sources(${PREF}WLGena.static PRIVATE
+    Gena.cc
+    Parser.cc
 )
 
-target_link_libraries(${PREF}WaylandScanner.static
+target_link_libraries(${PREF}WLGena.static
     PRIVATE
         ${PREF}libexpat.headers
 )
 
 if(NOT TARGET)
-    add_executable(${PREF}WaylandScanner)
-    target_cxx23(${PREF}WaylandScanner)
+    add_executable(${PREF}WLGena)
+    set_property(TARGET ${PREF}WLGena PROPERTY OUTPUT_NAME "wl_gena")
+    target_cxx23(${PREF}WLGena)
 endif()
 
-target_sources(${PREF}WaylandScanner PRIVATE Main.cc)
-target_link_libraries(${PREF}WaylandScanner PRIVATE 
-    ${PREF}WaylandScanner.static
+target_sources(${PREF}WLGena PRIVATE Main.cc)
+target_link_libraries(${PREF}WLGena PRIVATE
+    ${PREF}WLGena.static
     ${PREF}libexpat
 )

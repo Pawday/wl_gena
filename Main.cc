@@ -5,7 +5,7 @@
 
 #include <cstdlib>
 
-#include "WaylandScanner.hh"
+#include "Gena.hh"
 
 int main(int argc, char **argv)
 {

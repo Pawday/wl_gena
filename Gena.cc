@@ -17,9 +17,9 @@
 #include <cstdlib>
 
 #include "Format.hh"
-#include "ParseProtocol.hh"
+#include "Gena.hh"
+#include "Parser.hh"
 #include "Types.hh"
-#include "WaylandScanner.hh"
 
 namespace {
 

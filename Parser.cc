@@ -17,7 +17,7 @@
 #include <expat.h>
 #include <expat_external.h>
 
-#include "ParseProtocol.hh"
+#include "Parser.hh"
 #include "Types.hh"
 
 namespace Wayland {
