@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.28)
 
 project("${PREF}wl_gena")
 
-if(NOT TARGET ${PREF}libexpat)
+option(${PREF}WL_GENA_FIND_PACKAGE_EXPAT "Use find_package for libexpat" ON)
+
+if(NOT TARGET ${PREF}libexpat AND ${${PREF}WL_GENA_FIND_PACKAGE_EXPAT})
     if(TARGET ${PREF}libexpat.headers)
         message(FATAL_ERROR "Target ${PREF}libexpat.headers exist but [${PREF}libexpat] DOES NOT")
     endif()
@@ -23,33 +25,37 @@ function(target_cxx23 tgt)
 endfunction()
 
 
-add_library(${PREF}WLGena.headers INTERFACE)
-target_include_directories(${PREF}WLGena.headers INTERFACE
+if(NOT TARGET ${PREF}wl_gena.headers)
+    add_library(${PREF}wl_gena.headers INTERFACE)
+endif()
+target_include_directories(${PREF}wl_gena.headers INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-add_library(${PREF}WLGena.static STATIC)
-target_cxx23(${PREF}WLGena.static)
 
-target_sources(${PREF}WLGena.static PRIVATE
+if(NOT TARGET ${PREF}wl_gena.static)
+    add_library(${PREF}wl_gena.static STATIC)
+    target_cxx23(${PREF}wl_gena.static)
+endif()
+
+target_sources(${PREF}wl_gena.static PRIVATE
     GenaMain.cc
     Parser.cc
 )
 
-target_link_libraries(${PREF}WLGena.static PRIVATE
+target_link_libraries(${PREF}wl_gena.static PRIVATE
     ${PREF}libexpat.headers
-    ${PREF}WLGena.headers
+    ${PREF}wl_gena.headers
 )
 
-if(NOT TARGET)
-    add_executable(${PREF}WLGena)
-    set_property(TARGET ${PREF}WLGena PROPERTY OUTPUT_NAME "wl_gena")
-    target_cxx23(${PREF}WLGena)
+if(NOT TARGET ${PREF}wl_gena)
+    add_executable(${PREF}wl_gena)
+    target_cxx23(${PREF}wl_gena)
 endif()
 
-target_sources(${PREF}WLGena PRIVATE Main.cc)
-target_link_libraries(${PREF}WLGena PRIVATE
-    ${PREF}WLGena.headers
-    ${PREF}WLGena.static
+target_sources(${PREF}wl_gena PRIVATE Main.cc)
+target_link_libraries(${PREF}wl_gena PRIVATE
+    ${PREF}wl_gena.headers
+    ${PREF}wl_gena.static
     ${PREF}libexpat
 )
