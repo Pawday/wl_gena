@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.28)
 
 project("${PREF}wl_gena")
 
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 option(${PREF}WL_GENA_FIND_PACKAGE_EXPAT "Use find_package for libexpat" ON)
 
 if(NOT TARGET ${PREF}libexpat AND ${${PREF}WL_GENA_FIND_PACKAGE_EXPAT})
@@ -18,13 +20,6 @@ if(NOT TARGET ${PREF}libexpat AND ${${PREF}WL_GENA_FIND_PACKAGE_EXPAT})
     add_library(${PREF}libexpat ALIAS expat::expat)
 endif()
 
-function(target_cxx23 tgt)
-    set_property(TARGET ${tgt} PROPERTY CXX_STANDARD 23)
-    set_property(TARGET ${tgt} PROPERTY CXX_STANDARD_REQUIRED ON)
-    set_property(TARGET ${tgt} PROPERTY CXX_EXTENSIONS ON)
-endfunction()
-
-
 if(NOT TARGET ${PREF}wl_gena.headers)
     add_library(${PREF}wl_gena.headers INTERFACE)
 endif()
@@ -35,7 +30,8 @@ target_include_directories(${PREF}wl_gena.headers INTERFACE
 
 if(NOT TARGET ${PREF}wl_gena.static)
     add_library(${PREF}wl_gena.static STATIC)
-    target_cxx23(${PREF}wl_gena.static)
+    set(TARGET_TO_23 "${PREF}wl_gena.static")
+    include(target_cxx23)
 endif()
 
 target_sources(${PREF}wl_gena.static PRIVATE
@@ -50,7 +46,8 @@ target_link_libraries(${PREF}wl_gena.static PRIVATE
 
 if(NOT TARGET ${PREF}wl_gena)
     add_executable(${PREF}wl_gena)
-    target_cxx23(${PREF}wl_gena)
+    set(TARGET_TO_23 "${PREF}wl_gena")
+    include(target_cxx23)
 endif()
 
 target_sources(${PREF}wl_gena PRIVATE Main.cc)
