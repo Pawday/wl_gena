@@ -5,6 +5,7 @@ project("${PREF}wl_gena")
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 option(${PREF}WL_GENA_FIND_PACKAGE_EXPAT "Use find_package for libexpat" ON)
+option(${PREF}WL_GENA_LIB_ONLY "Do not build wl_gena executable" OFF)
 
 if(NOT TARGET ${PREF}libexpat AND ${${PREF}WL_GENA_FIND_PACKAGE_EXPAT})
     if(TARGET ${PREF}libexpat.headers)
@@ -34,6 +35,8 @@ if(NOT TARGET ${PREF}wl_gena.static)
     include(target_cxx23)
 endif()
 
+set(TARGET_TO_STRICTIFY ${PREF}wl_gena.static)
+include(target_strict_compilation)
 target_sources(${PREF}wl_gena.static PRIVATE
     GenaMain.cc
     Parser.cc
@@ -44,11 +47,18 @@ target_link_libraries(${PREF}wl_gena.static PRIVATE
     ${PREF}wl_gena.headers
 )
 
+if(${${PREF}WL_GENA_LIB_ONLY})
+    return()
+endif()
+
 if(NOT TARGET ${PREF}wl_gena)
     add_executable(${PREF}wl_gena)
     set(TARGET_TO_23 "${PREF}wl_gena")
     include(target_cxx23)
 endif()
+
+set(TARGET_TO_STRICTIFY ${PREF}wl_gena)
+include(target_strict_compilation)
 
 target_sources(${PREF}wl_gena PRIVATE Main.cc)
 target_link_libraries(${PREF}wl_gena PRIVATE
