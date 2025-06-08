@@ -31,21 +31,48 @@ target_include_directories(${PREF}wl_gena.headers INTERFACE
 
 if(NOT TARGET ${PREF}wl_gena.static)
     add_library(${PREF}wl_gena.static STATIC)
-    set(TARGET_TO_23 "${PREF}wl_gena.static")
-    include(target_cxx23)
 endif()
 
-set(TARGET_TO_STRICTIFY ${PREF}wl_gena.static)
+if(NOT TARGET ${PREF}wl_gena.PIC_static)
+    add_library(${PREF}wl_gena.PIC_static STATIC)
+endif()
+set_target_properties(${PREF}wl_gena.PIC_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if(NOT TARGET ${PREF}wl_gena.shared)
+    add_library(${PREF}wl_gena.shared SHARED)
+endif()
+
+set(TARGET_TO_23 "${PREF}wl_gena.static")
+include(target_cxx23)
+set(TARGET_TO_23 "${PREF}wl_gena.PIC_static")
+include(target_cxx23)
+set(TARGET_TO_23 "${PREF}wl_gena.shared")
+include(target_cxx23)
+
+set(TARGET_TO_STRICTIFY "${PREF}wl_gena.static")
 include(target_strict_compilation)
-target_sources(${PREF}wl_gena.static PRIVATE
+set(TARGET_TO_STRICTIFY "${PREF}wl_gena.PIC_static")
+include(target_strict_compilation)
+set(TARGET_TO_STRICTIFY "${PREF}wl_gena.shared")
+include(target_strict_compilation)
+
+list(APPEND SOURCES
     GenaMain.cc
     Parser.cc
 )
 
-target_link_libraries(${PREF}wl_gena.static PRIVATE
+target_sources(${PREF}wl_gena.static PRIVATE ${SOURCES})
+target_sources(${PREF}wl_gena.PIC_static PRIVATE ${SOURCES})
+target_sources(${PREF}wl_gena.shared PRIVATE ${SOURCES})
+
+list(APPEND PRIVATE_HEADER_LIBS
     ${PREF}libexpat.headers
     ${PREF}wl_gena.headers
 )
+
+target_link_libraries(${PREF}wl_gena.static PRIVATE ${PRIVATE_HEADER_LIBS})
+target_link_libraries(${PREF}wl_gena.PIC_static PRIVATE ${PRIVATE_HEADER_LIBS})
+target_link_libraries(${PREF}wl_gena.shared PRIVATE ${PRIVATE_HEADER_LIBS})
 
 if(${${PREF}WL_GENA_LIB_ONLY})
     return()
