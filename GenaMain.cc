@@ -5,7 +5,7 @@
 #include <iostream>
 #include <iterator>
 #include <ranges>
-#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 
 #include "wl_gena/GenaMain.hh"
@@ -27,106 +28,7 @@ namespace {
 struct JsonModeArgs
 {
     std::string proto_file_name;
-    bool wl_strip = false;
 };
-
-std::string strip_wayland_prefix(const std::string &in)
-{
-    std::string_view in_v{in};
-    constexpr char pref_val[] = "wl_";
-    auto pref_size = in_v.find(pref_val);
-    if (pref_size == in_v.npos) {
-        return in;
-    }
-
-    if (pref_size != 0) {
-        return in;
-    }
-
-    in_v.remove_prefix(sizeof(pref_val) - 1);
-
-    return std::string{in_v};
-}
-
-struct ArgInterfaceNameDemangleVisitor
-{
-
-    template <typename T>
-    void interface_nameable_wayland_prefix_strip(T &arg)
-    {
-        constexpr bool is_interface_nameable =
-            std::is_base_of_v<Wayland::ScannerTypes::InterfaceNameable, T>;
-
-        if constexpr (is_interface_nameable) {
-            if (!arg.interface_name.has_value()) {
-                return;
-            }
-            arg.interface_name =
-                strip_wayland_prefix(arg.interface_name.value());
-        }
-    }
-
-#define OVERLOAD(TYPENAME)                                                     \
-    void operator()(TYPENAME &arg)                                             \
-    {                                                                          \
-        interface_nameable_wayland_prefix_strip(arg);                          \
-    }
-
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeInt)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeUInt)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeUIntEnum)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeFixed)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeString)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeNullString)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeObject)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeNullObject)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeNewID)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeArray)
-    OVERLOAD(Wayland::ScannerTypes::ArgTypeFD)
-#undef OVERLOAD
-};
-
-Wayland::ScannerTypes::Arg
-    demangle_wayland_names(const Wayland::ScannerTypes::Arg &arg)
-{
-    auto out = arg;
-    std::visit(ArgInterfaceNameDemangleVisitor{}, out.type);
-    return out;
-}
-
-Wayland::ScannerTypes::Interface
-    demangle_wayland_names(const Wayland::ScannerTypes::Interface &iface)
-{
-    auto out = iface;
-    out.name = strip_wayland_prefix(iface.name);
-
-    for (auto &req : out.requests) {
-        for (auto &arg : req.args) {
-            arg = demangle_wayland_names(arg);
-        }
-    }
-
-    for (auto &event : out.events) {
-        for (auto &arg : event.args) {
-            arg = demangle_wayland_names(arg);
-        }
-    }
-
-    return out;
-}
-
-Wayland::ScannerTypes::Protocol
-    demangle_wayland_names(const Wayland::ScannerTypes::Protocol &proto)
-{
-    auto out = proto;
-    out.name = strip_wayland_prefix(out.name);
-
-    for (auto &iface : out.interfaces) {
-        iface = demangle_wayland_names(iface);
-    }
-
-    return out;
-}
 
 std::expected<JsonModeArgs, std::string>
     parse_json_mode_args(std::vector<std::string> args)
@@ -136,13 +38,6 @@ std::expected<JsonModeArgs, std::string>
         return std::unexpected("No --json flag");
     }
     args.erase(json_flag_it);
-
-    bool wl_strip = false;
-    auto wl_strip_flag_it = std::ranges::find(args, "--wl_strip");
-    if (wl_strip_flag_it != std::end(args)) {
-        args.erase(wl_strip_flag_it);
-        wl_strip = true;
-    }
 
     if (args.empty()) {
         return std::unexpected("Expected <protocol_file> argument");
@@ -162,35 +57,48 @@ std::expected<JsonModeArgs, std::string>
     args.clear();
 
     JsonModeArgs out{};
-    out.wl_strip = wl_strip;
     out.proto_file_name = input_proto_filename;
 
     return out;
 }
 
-std::string read_file(const std::string &filename)
+std::vector<std::byte> read_file(const std::string &name)
 {
-    std::ifstream file{filename};
-    file.exceptions(std::ifstream::failbit);
-    file.exceptions(std::ifstream::badbit);
-    std::stringstream content;
-    content << file.rdbuf();
-    return content.str();
+    std::ifstream ifile{name, std::ios::binary};
+    ifile.exceptions(std::fstream::badbit);
+    ifile.exceptions(std::fstream::failbit);
+    auto start = std::istreambuf_iterator<char>{ifile};
+    auto end = std::istreambuf_iterator<char>{};
+    std::vector<std::byte> out;
+    while (start != end) {
+        uint8_t val = *start;
+        out.emplace_back(std::byte{val});
+        start++;
+    }
+
+    return out;
+}
+
+std::string read_text_file(const std::string &name)
+{
+    std::string output;
+    auto data = read_file(name);
+
+    auto to_char = [](std::byte b) { return std::to_integer<char>(b); };
+    std::ranges::copy(
+        data | std::views::transform(to_char), std::back_inserter(output));
+    return output;
 }
 
 void process_json_mode(const JsonModeArgs &args)
 {
-    std::string protocol_xml = read_file(args.proto_file_name);
+    std::string protocol_xml = read_text_file(args.proto_file_name);
     auto protocol_op = Wayland::parse_protocol(protocol_xml);
     if (!protocol_op) {
         std::cerr << protocol_op.error();
         return;
     }
     auto &protocol = protocol_op.value();
-    if (args.wl_strip) {
-        std::cout << std::format("{}\n", demangle_wayland_names(protocol));
-        return;
-    }
 
     std::cout << std::format("{}\n", protocol);
 }
@@ -199,7 +107,6 @@ struct EnumsModeArgs
 {
     std::string proto_file_name;
     std::string output_file_name;
-    bool wl_strip = false;
 };
 
 std::expected<EnumsModeArgs, std::string>
@@ -210,13 +117,6 @@ std::expected<EnumsModeArgs, std::string>
         return std::unexpected("No --enums flag");
     }
     args.erase(flag_it);
-
-    bool wl_strip = false;
-    auto wl_strip_flag_it = std::ranges::find(args, "--wl_strip");
-    if (wl_strip_flag_it != std::end(args)) {
-        args.erase(wl_strip_flag_it);
-        wl_strip = true;
-    }
 
     if (args.size() != 2) {
         std::string message;
@@ -243,7 +143,6 @@ std::expected<EnumsModeArgs, std::string>
 
     out.proto_file_name = args.at(0);
     out.output_file_name = args.at(1);
-    out.wl_strip = wl_strip;
 
     return out;
 }
@@ -284,7 +183,7 @@ std::vector<std::string> emit_enum(const Wayland::ScannerTypes::Enum &e)
 
 void process_enums_mode(const EnumsModeArgs &args)
 {
-    std::string protocol_xml = read_file(args.proto_file_name);
+    std::string protocol_xml = read_text_file(args.proto_file_name);
     std::ofstream output_file{args.output_file_name};
     output_file.exceptions(std::ifstream::failbit);
     output_file.exceptions(std::ifstream::badbit);
@@ -294,25 +193,28 @@ void process_enums_mode(const EnumsModeArgs &args)
         return;
     }
     auto protocol = protocol_op.value();
-    if (args.wl_strip) {
-        protocol = demangle_wayland_names(protocol_op.value());
-    }
     auto &interfaces = protocol.interfaces;
 
     std::vector<std::string> o_lines;
     o_lines.emplace_back("#pragma once");
     o_lines.emplace_back("");
-
-    o_lines.emplace_back("namespace Wayland");
-    o_lines.emplace_back("{");
-    o_lines.emplace_back("");
-
-    o_lines.emplace_back(std::format("namespace {}_protocol", protocol.name));
+    o_lines.emplace_back(std::format("namespace {}", protocol.name));
     o_lines.emplace_back("{");
     o_lines.emplace_back("");
 
     bool first_interface = true;
     for (auto &interface : interfaces) {
+        using EnumStringLines = std::vector<std::string>;
+        std::vector<EnumStringLines> interface_enums;
+
+        for (auto &eenum : interface.enums) {
+            interface_enums.emplace_back(emit_enum(eenum));
+        }
+
+        if (interface_enums.empty()) {
+            continue;
+        }
+
         if (!first_interface) {
             o_lines.emplace_back("");
         }
@@ -320,20 +222,15 @@ void process_enums_mode(const EnumsModeArgs &args)
 
         o_lines.emplace_back(std::format("namespace {}", interface.name));
         o_lines.emplace_back("{");
-
-        for (auto &eenum : interface.enums) {
-            auto enum_lines = emit_enum(eenum);
-
-            for (auto &enum_line : enum_lines) {
-                o_lines.emplace_back(std::move(enum_line));
+        for (auto &enum_lines : interface_enums) {
+            for (auto &line : enum_lines) {
+                o_lines.emplace_back(std::format("    {}", line));
             }
         }
-
         o_lines.emplace_back("}");
     }
 
     o_lines.emplace_back("}"); // namespace <protocol_name>
-    o_lines.emplace_back("}"); // namespace Wayland
 
     std::string output;
     for (auto &o_line : o_lines) {
