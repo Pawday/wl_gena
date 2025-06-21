@@ -319,8 +319,8 @@ struct ProtoParser
         template <typename T>
         void operator()(T &t)
         {
-            std::string message = std::format(
-                "Attempt to add request field to {}", target_name(t));
+            std::string message =
+                std::format("Attempt to add event field to {}", target_name(t));
             throw std::runtime_error(std::move(message));
         }
 
@@ -370,13 +370,13 @@ struct ProtoParser
          */
 
         if (arg_type_string == "int") {
-            return ScannerTypes::ArgTypeInt{};
+            return ScannerTypes::ArgTypes::Int{};
         }
 
         if (arg_type_string == "uint") {
 
             if (!attrs.contains("enum")) {
-                return ScannerTypes::ArgTypeUInt{};
+                return ScannerTypes::ArgTypes::UInt{};
             }
 
             /*
@@ -390,7 +390,7 @@ struct ProtoParser
                 enum_location.find(".") != enum_location.npos;
 
             if (!has_interface_name) {
-                ScannerTypes::ArgTypeUIntEnum out{};
+                ScannerTypes::ArgTypes::UIntEnum out{};
                 out.name = std::move(enum_location);
                 return out;
             }
@@ -432,14 +432,14 @@ struct ProtoParser
             }
             auto &sep = sep_op.value();
 
-            ScannerTypes::ArgTypeUIntEnum out{};
+            ScannerTypes::ArgTypes::UIntEnum out{};
             out.interface_name = std::move(sep.first);
             out.name = std::move(sep.second);
             return out;
         }
 
         if (arg_type_string == "fixed") {
-            return ScannerTypes::ArgTypeFixed{};
+            return ScannerTypes::ArgTypes::Fixed{};
         }
 
         if (arg_type_string == "string" || arg_type_string == "object") {
@@ -448,13 +448,13 @@ struct ProtoParser
             ScannerTypes::ArgType null_out_t;
 
             if (arg_type_string == "string") {
-                out_t = ScannerTypes::ArgTypeString{};
-                null_out_t = ScannerTypes::ArgTypeNullString{};
+                out_t = ScannerTypes::ArgTypes::String{};
+                null_out_t = ScannerTypes::ArgTypes::NullString{};
             } else if (arg_type_string == "object") {
-                ScannerTypes::ArgTypeObject obj{};
+                ScannerTypes::ArgTypes::Object obj{};
                 obj.interface_name = interface_name;
                 out_t = std::move(obj);
-                ScannerTypes::ArgTypeNullObject null_obj{};
+                ScannerTypes::ArgTypes::NullObject null_obj{};
                 null_obj.interface_name = interface_name;
                 null_out_t = std::move(null_obj);
             } else {
@@ -482,17 +482,17 @@ struct ProtoParser
         }
 
         if (arg_type_string == "new_id") {
-            ScannerTypes::ArgTypeNewID new_id{};
+            ScannerTypes::ArgTypes::NewID new_id{};
             new_id.interface_name = interface_name;
             return new_id;
         }
 
         if (arg_type_string == "array") {
-            return ScannerTypes::ArgTypeArray{};
+            return ScannerTypes::ArgTypes::Array{};
         }
 
         if (arg_type_string == "fd") {
-            return ScannerTypes::ArgTypeFD{};
+            return ScannerTypes::ArgTypes::FD{};
         }
 
         return std::unexpected(

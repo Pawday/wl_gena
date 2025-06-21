@@ -14,34 +14,37 @@ struct InterfaceNameable
     std::optional<std::string> interface_name;
 };
 
-// clang-format off
-struct ArgTypeInt {};
-struct ArgTypeUInt {};
-struct ArgTypeUIntEnum : InterfaceNameable
+struct ArgTypes
+{
+    // clang-format off
+struct Int {};
+struct UInt {};
+struct UIntEnum : InterfaceNameable
 {
     std::string name;
 };
-struct ArgTypeFixed {};
-struct ArgTypeString {};
-struct ArgTypeNullString {};
-struct ArgTypeObject : InterfaceNameable {};
-struct ArgTypeNullObject : InterfaceNameable {};
-struct ArgTypeNewID : InterfaceNameable {};
-struct ArgTypeArray {};
-struct ArgTypeFD {};
+struct Fixed {};
+struct String {};
+struct NullString {};
+struct Object : InterfaceNameable {};
+struct NullObject : InterfaceNameable {};
+struct NewID : InterfaceNameable {};
+struct Array {};
+struct FD {};
+};
 
 using ArgType = std::variant<
-    ArgTypeInt,
-    ArgTypeUInt,
-    ArgTypeUIntEnum,
-    ArgTypeFixed,
-    ArgTypeString,
-    ArgTypeNullString,
-    ArgTypeObject,
-    ArgTypeNullObject,
-    ArgTypeNewID,
-    ArgTypeArray,
-    ArgTypeFD
+    ArgTypes::Int,
+    ArgTypes::UInt,
+    ArgTypes::UIntEnum,
+    ArgTypes::Fixed,
+    ArgTypes::String,
+    ArgTypes::NullString,
+    ArgTypes::Object,
+    ArgTypes::NullObject,
+    ArgTypes::NewID,
+    ArgTypes::Array,
+    ArgTypes::FD
 >;
 // clang-format on
 

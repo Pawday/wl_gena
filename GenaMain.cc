@@ -4,15 +4,19 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -21,9 +25,13 @@
 
 #include "Format.hh"
 #include "Parser.hh"
+#include "StringDG.hh"
+#include "StringList.hh"
 #include "Types.hh"
 
 namespace {
+
+using InterfaceData = Wayland::ScannerTypes::Interface;
 
 struct JsonModeArgs
 {
@@ -110,11 +118,11 @@ struct EnumsModeArgs
 };
 
 std::expected<EnumsModeArgs, std::string>
-    parse_enums_mode(std::vector<std::string> args)
+    parse_header_mode(std::vector<std::string> args)
 {
-    auto flag_it = std::ranges::find(args, "--enums");
+    auto flag_it = std::ranges::find(args, "--header");
     if (flag_it == std::end(args)) {
-        return std::unexpected("No --enums flag");
+        return std::unexpected("No --header flag");
     }
     args.erase(flag_it);
 
@@ -125,7 +133,7 @@ std::expected<EnumsModeArgs, std::string>
             message += " only";
         }
         message += " <protocol_file> and <output_file> arguments";
-        message += " with --enums flag";
+        message += " with --header flag";
 
         std::vector<std::string> dec_args;
         std::ranges::copy(args, std::back_inserter(dec_args));
@@ -147,41 +155,576 @@ std::expected<EnumsModeArgs, std::string>
     return out;
 }
 
-std::vector<std::string> emit_enum(const Wayland::ScannerTypes::Enum &e)
+struct TypeToStringVisitor
 {
-    std::vector<std::string> out;
-
-    out.emplace_back(std::format("enum class {}", e.name));
-    out.emplace_back("{");
-
-    std::vector<std::string> entries;
-    for (auto &entry : e.entries) {
-        std::string value = std::format("{}", entry.value);
-        if (entry.is_hex) {
-            value = std::format("0x{:x}", entry.value);
+    /*
+     * from wayland-scanner
+    static void emit_type(struct arg *a)
+    {
+        switch (a->type) {
+        default:
+        case INT:
+        case FD:
+            printf("int32_t ");
+            break;
+        case NEW_ID:
+        case UNSIGNED:
+            printf("uint32_t ");
+            break;
+        case FIXED:
+            printf("wl_fixed_t ");
+            break;
+        case STRING:
+            printf("const char *");
+            break;
+        case OBJECT:
+            printf("struct %s *", a->interface_name);
+            break;
+        case ARRAY:
+            printf("struct wl_array *");
+            break;
         }
-        entries.emplace_back(std::format("{} = {}", entry.name, value));
+    }
+    */
+
+    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+
+#define OVERLOAD(TYPE, type_literal)                                           \
+    std::string operator()(ArgTypes::TYPE)                                     \
+    {                                                                          \
+        return type_literal;                                                   \
     }
 
-    auto except_last = entries | std::views::take(entries.size() - 1);
-    for (auto &entry : except_last) {
-        entry = std::format("{},", entry);
+    OVERLOAD(Int, "int32_t");
+    OVERLOAD(FD, "/* fd */ int32_t");
+
+    std::string operator()(ArgTypes::NewID id)
+    {
+        return std::format(
+            "/* new_id {} */ uint32_t", id.interface_name.value());
+    };
+
+    OVERLOAD(UInt, "uint32_t");
+
+    std::string operator()(ArgTypes::UIntEnum e)
+    {
+        std::string enum_name = e.name;
+        if (e.interface_name.has_value()) {
+            enum_name = std::format(
+                "{}_interface<CORE_T>::{}",
+                e.interface_name.value(),
+                enum_name);
+        }
+        return std::format("enum {}", enum_name);
+    };
+
+    OVERLOAD(Fixed, "/* wl_fixed_t */ int32_t");
+
+    OVERLOAD(String, "const char *");
+    OVERLOAD(NullString, "/* nullptr */ const char *");
+
+    std::string object_interface_name(
+        Wayland::ScannerTypes::InterfaceNameable &iface,
+        const std::string &orig_type_diag)
+    {
+        if (!iface.interface_name.has_value()) {
+            return std::format("/* {} */ void*", orig_type_diag);
+        }
+        return std::format(
+            "/* {} */ {} *", orig_type_diag, iface.interface_name.value());
     }
 
-    for (auto &entry : entries) {
-        entry = std::format("    e{}", entry);
+    std::string operator()(ArgTypes::Object obj)
+    {
+        return object_interface_name(obj, "object");
+    };
+
+    std::string operator()(ArgTypes::NullObject obj)
+    {
+        return object_interface_name(obj, "nullptr<object>");
+    };
+
+    OVERLOAD(Array, "struct wl_array *")
+
+#undef OVERLOAD
+};
+
+StringList
+    emit_interface_listener_type_event(const Wayland::ScannerTypes::Event &ev)
+{
+    StringList o;
+    o += "// emit_interface_listener_type_event";
+
+    StringList args;
+
+    args += "void *data";
+    for (auto &arg : ev.args) {
+        std::string type_string = std::visit(TypeToStringVisitor{}, arg.type);
+        args += std::format("{} {}", type_string, arg.name);
     }
 
-    for (auto &entry : entries) {
-        out.emplace_back(std::move(entry));
+    auto rargs = std::views::reverse(args.get());
+
+    bool first = true;
+    for (auto &arg : rargs) {
+        std::string val = arg;
+        if (!first) {
+            val += ',';
+        }
+        first = false;
+        arg = std::move(val);
     }
 
-    out.emplace_back("};");
+    o += std::format("using {}_FN = void(", ev.name);
+    args.leftPad("    ");
+    o += std::move(args);
+    o += ");";
+    o += std::format("{}_FN *{} = nullptr;", ev.name, ev.name);
 
-    return out;
+    return o;
 }
 
-void process_enums_mode(const EnumsModeArgs &args)
+StringList emit_interface_event_listener_type(
+    const std::vector<Wayland::ScannerTypes::Event> &events)
+{
+    if (events.empty()) {
+        throw std::logic_error("Cannot generate listener for empty events");
+    }
+
+    StringList o;
+    o += "// emit_interface_event_listener_type";
+    o += "struct listener";
+    o += "{";
+    bool first = true;
+    for (auto &event : events) {
+        if (!first) {
+            o += "";
+        }
+        first = false;
+        auto typedef_str = emit_interface_listener_type_event(event);
+        typedef_str.leftPad("    ");
+        o += std::move(typedef_str);
+    }
+    o += "};";
+
+    return o;
+}
+
+StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
+{
+    StringList o;
+    std::string n = iface.name;
+
+    o += "// emit_interface_add_listener_member_fn";
+    o += std::format(
+        "int add_listener({0} *{0}, const listener *listener, void *data)", n);
+    o += "{";
+    {
+        StringList b;
+        b += std::format("return _core->wl_proxy_add_listener(");
+        b += std::format("    reinterpret_cast<wl_proxy*>({0}),", n);
+        b += std::format("    (void (**)(void))listener,");
+        b += std::format("    data");
+        b += std::format(");");
+        b.leftPad("    ");
+        o += std::move(b);
+    }
+    o += "}";
+    return o;
+}
+
+StringList emit_interface_ctor(const InterfaceData &iface)
+{
+    StringList o;
+    o += "// emit_interface_ctor";
+    o += std::format(
+        "{}_interface(std::shared_ptr<CORE_T> core) : _core{{core}}{{}};",
+        iface.name);
+    return o;
+}
+
+StringList emit_enum(const Wayland::ScannerTypes::Enum &eenum)
+{
+    StringList o;
+    o += "// emit_enum";
+
+    o += std::format("enum class {}", eenum.name);
+    o += "{";
+
+    StringList es;
+    for (auto &entry : eenum.entries) {
+        std::string val;
+        if (entry.is_hex) {
+            val = std::format("0x{:x}", entry.value);
+        } else {
+            val = std::format("{}", entry.value);
+        }
+        std::string enum_name = entry.name;
+        if (std::isdigit(enum_name.at(0))) {
+            enum_name = std::format("n{}", enum_name);
+        }
+
+        auto bad_enum_name = [](const std::string &name) {
+            if (name == "default") {
+                return true;
+            }
+            return false;
+        };
+
+        if (bad_enum_name(enum_name)) {
+            enum_name = std::format("e{}", enum_name);
+        }
+        es += std::format("{} = {}", enum_name, val);
+    }
+
+    auto rev = std::ranges::views::reverse(es.get());
+
+    bool first = true;
+    for (std::string &s : rev) {
+        if (first) {
+            first = false;
+            continue;
+        }
+        s = std::format("{},", s);
+    }
+
+    es.leftPad("    ");
+    o += std::move(es);
+    o += "};";
+
+    return o;
+}
+
+struct ArgInterfaceDependencyGetterVisitor
+{
+    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+    using InterfaceNameable = Wayland::ScannerTypes::InterfaceNameable;
+
+    std::optional<std::string> from_namable(const InterfaceNameable &n)
+    {
+        return n.interface_name;
+    }
+
+#define OVERLOAD(TYPENAME)                                                     \
+    std::optional<std::string> operator()(const ArgTypes::TYPENAME &)          \
+    {                                                                          \
+        return std::nullopt;                                                   \
+    }
+
+#define OVERLOAD_N(TYPENAME)                                                   \
+    std::optional<std::string> operator()(const ArgTypes::TYPENAME &n)         \
+    {                                                                          \
+        return from_namable(n);                                                \
+    }
+
+    // TODO Deal with different type of dependecies (all types form a cycles)
+    OVERLOAD(Int);
+    OVERLOAD(UInt);
+    OVERLOAD_N(UIntEnum);
+    OVERLOAD(Fixed);
+    OVERLOAD(String);
+    OVERLOAD(NullString);
+    OVERLOAD(Object);
+    OVERLOAD(NullObject);
+    OVERLOAD(NewID);
+    OVERLOAD(Array);
+    OVERLOAD(FD);
+
+#undef OVERLOAD
+#undef OVERLOAD_N
+};
+
+// TODO Deal with different type of dependecies (all types form a cycles)
+std::optional<std::string>
+    get_arg_interface_dep(const Wayland::ScannerTypes::Arg &arg)
+{
+    return std::visit(ArgInterfaceDependencyGetterVisitor{}, arg.type);
+}
+
+std::unordered_set<std::string>
+    interface_get_enum_deps(const InterfaceData &iface)
+{
+    std::unordered_set<std::string> o;
+
+    std::vector<Wayland::ScannerTypes::Message> msgs;
+    for (auto &event : iface.events) {
+        msgs.push_back(event);
+    }
+
+    for (auto &req : iface.requests) {
+        msgs.push_back(req);
+    }
+
+    for (auto &msg : msgs) {
+        for (auto &arg : msg.args) {
+            std::optional<std::string> dep_iface_name =
+                get_arg_interface_dep(arg);
+            if (!dep_iface_name.has_value()) {
+                continue;
+            }
+            o.insert(dep_iface_name.value());
+        }
+    }
+
+    return o;
+}
+
+StringList emit_interface_request(
+    const Wayland::ScannerTypes::Request &req,
+    const std::string &interface_name)
+{
+    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
+    StringList o;
+    o += "// emit_interface_request";
+
+    std::optional<NewID> first_new_id_arg_op;
+    std::vector<std::string> new_id_arg_names;
+    for (auto &arg : req.args) {
+        const NewID *new_id_arg_p = std::get_if<NewID>(&arg.type);
+        if (new_id_arg_p == nullptr) {
+            continue;
+        }
+        if (!first_new_id_arg_op) {
+            first_new_id_arg_op = *new_id_arg_p;
+        }
+        new_id_arg_names.emplace_back(arg.name);
+    }
+
+    if (new_id_arg_names.size() > 1) {
+        /*
+         * I have no idea why it is that way:
+         * Reference implementation seems to ignore requests with
+         * more than one argument with type="new_id"
+         *
+         * So it seems rigth to do the same thing here
+         */
+        o += "/*";
+        o += std::format(
+            " * Multiple new_id args: Ignore [{}] request generation",
+            req.name);
+        size_t new_id_name_i = 0;
+        for (auto &new_id_name : new_id_arg_names) {
+            o += std::format(" * new_id[{}] {}", new_id_name_i, new_id_name);
+            new_id_name_i++;
+        }
+        o += " */";
+        return o;
+    }
+
+    std::string req_ret_type = "void";
+    if (first_new_id_arg_op.has_value()) {
+        req_ret_type = "void*";
+        auto &new_id = first_new_id_arg_op.value();
+        if (new_id.interface_name.has_value()) {
+            req_ret_type = std::format("{}*", new_id.interface_name.value());
+        }
+    }
+
+    struct MetaArg
+    {
+        std::string content;
+        bool nogen = false;
+    };
+
+    std::vector<MetaArg> meta_args;
+
+    std::string first_arg = std::format("{0} *obj", interface_name);
+    meta_args.emplace_back(std::move(first_arg));
+
+    for (auto &arg : req.args) {
+        const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
+        if (arg_new_id_p != nullptr) {
+            auto arg_interface_name = arg_new_id_p->interface_name;
+            if (!arg_interface_name) {
+                meta_args.emplace_back("const struct wl_interface *interface");
+                meta_args.emplace_back("uint32_t version");
+                continue;
+            }
+
+            std::string nogen_diag = std::format(
+                "// [[nogen]] (name=[{}] type=[new_id] interface=[{}])",
+                arg.name,
+                arg_interface_name.value());
+            MetaArg new_id_nogen_arg{std::move(nogen_diag)};
+            new_id_nogen_arg.nogen = true;
+            meta_args.emplace_back(std::move(new_id_nogen_arg));
+
+            continue;
+        }
+
+        std::string arg_typename = std::visit(TypeToStringVisitor{}, arg.type);
+        meta_args.emplace_back(std::format("{} {}", arg_typename, arg.name));
+    }
+
+    auto args_inv = std::ranges::views::reverse(meta_args);
+    bool first = true;
+    for (auto &arg : args_inv) {
+        if (arg.nogen) {
+            continue;
+        }
+
+        if (!first) {
+            arg.content = std::format("{},", arg.content);
+        }
+        first = false;
+    }
+
+    StringList args_strings;
+    for (MetaArg &meta : meta_args) {
+        args_strings += std::move(meta.content);
+    }
+    meta_args.clear();
+
+    o += std::format("{} {}(", req_ret_type, req.name);
+    args_strings.leftPad("    ");
+    o += std::move(args_strings);
+    o += "); /* TODO: Generate body */";
+
+    return o;
+}
+
+StringList emit_interface_requests(const InterfaceData &iface)
+{
+    StringList o;
+    o += "// emit_interface_requests";
+
+    size_t next_req_index = 0;
+    for (auto &req : iface.requests) {
+        auto req_i = next_req_index;
+        next_req_index++;
+        o += std::format(
+            "static constexpr size_t request_index_{} = {};", req.name, req_i);
+        o += emit_interface_request(req, iface.name);
+        if (next_req_index != 0) {
+            o += "";
+        }
+    }
+
+    return o;
+}
+
+StringList emit_interface(const InterfaceData &iface)
+{
+    StringList o;
+    o += "// emit_interface";
+    {
+        auto enum_deps = interface_get_enum_deps(iface);
+        if (!enum_deps.empty()) {
+            o += "";
+            StringList deps;
+            for (auto &dep : enum_deps) {
+                deps += std::format("[{}]", dep);
+            }
+            deps.leftPad(" * ");
+            o += "/*";
+            o += " * Dependencies:";
+            o += std::move(deps);
+            o += " */";
+        }
+    }
+
+    o += "template <typename CORE_T>";
+    o += std::format("struct {}_interface", iface.name);
+    o += "{";
+    bool has_structure = false;
+    auto add_sep = [&has_structure, &o]() {
+        if (has_structure) {
+            o += "";
+        }
+    };
+
+    {
+        for (auto &e : iface.enums) {
+            add_sep();
+            StringList eenum = emit_enum(e);
+            eenum.leftPad("    ");
+
+            has_structure = true;
+            o += std::move(eenum);
+        }
+    }
+
+    bool has_events = !iface.events.empty();
+    if (has_events) {
+        add_sep();
+
+        StringList type = emit_interface_event_listener_type(iface.events);
+        type.leftPad("    ");
+        has_structure = true;
+        o += std::move(type);
+    }
+
+    {
+        add_sep();
+        StringList ctor = emit_interface_ctor(iface);
+        ctor.leftPad("    ");
+        o += std::move(ctor);
+    }
+
+    if (has_events) {
+        add_sep();
+        StringList add_listener_code =
+            emit_interface_add_listener_member_fn(iface);
+        add_listener_code.leftPad("    ");
+        has_structure = true;
+        o += std::move(add_listener_code);
+    }
+
+    {
+        add_sep();
+        StringList requests = emit_interface_requests(iface);
+        requests.leftPad("    ");
+        has_structure = true;
+        o += std::move(requests);
+    }
+
+    o += "";
+    o += "private:";
+    o += "    std::shared_ptr<CORE_T> _core;";
+    o += "};";
+
+    return o;
+}
+
+std::vector<InterfaceData>
+    topo_sort_interfaces(const std::vector<InterfaceData> &in)
+{
+    std::unordered_map<std::string, InterfaceData> ifaces;
+    for (auto &iface : in) {
+        ifaces.insert({iface.name, iface});
+    }
+
+    StringDG graph;
+    for (auto &iface : ifaces) {
+        graph.add_node(iface.first);
+    }
+
+    for (auto &iface : ifaces) {
+        auto deps = interface_get_enum_deps(iface.second);
+        for (auto &dep_name : deps) {
+            graph.add_dependency(dep_name, iface.first);
+        }
+    }
+
+    {
+        std::ofstream ifaces_file{"ifaces.dot"};
+        ifaces_file << graph.dump();
+    }
+    {
+        std::ofstream ifaces_sorted_file{"ifaces_sorted.dot"};
+        ifaces_sorted_file << graph.topo_sorted_dg().dump();
+    }
+
+    std::vector<InterfaceData> o;
+    auto sorted_names = graph.topo_sorted();
+    for (auto &name : sorted_names) {
+        o.emplace_back(std::move(ifaces.at(name)));
+    }
+    std::ranges::reverse(o);
+    return o;
+}
+
+void process_header_mode(const EnumsModeArgs &args)
 {
     std::string protocol_xml = read_text_file(args.proto_file_name);
     std::ofstream output_file{args.output_file_name};
@@ -193,47 +736,58 @@ void process_enums_mode(const EnumsModeArgs &args)
         return;
     }
     auto protocol = protocol_op.value();
-    auto &interfaces = protocol.interfaces;
+    auto interfaces = protocol.interfaces;
+    auto sorted_interfaces = topo_sort_interfaces(interfaces);
 
-    std::vector<std::string> o_lines;
-    o_lines.emplace_back("#pragma once");
-    o_lines.emplace_back("");
-    o_lines.emplace_back(std::format("namespace {}", protocol.name));
-    o_lines.emplace_back("{");
-    o_lines.emplace_back("");
+    StringList o;
+    o += "#pragma once";
+    o += "";
+    o += "#include <memory>";
+    o += "";
+    o += "#include <cstdint>";
+    o += "#include <cstddef>";
+    o += "";
 
-    bool first_interface = true;
-    for (auto &interface : interfaces) {
-        using EnumStringLines = std::vector<std::string>;
-        std::vector<EnumStringLines> interface_enums;
+    o += "struct wl_proxy;";
 
-        for (auto &eenum : interface.enums) {
-            interface_enums.emplace_back(emit_enum(eenum));
-        }
+    o += "";
 
-        if (interface_enums.empty()) {
-            continue;
-        }
-
-        if (!first_interface) {
-            o_lines.emplace_back("");
-        }
-        first_interface = false;
-
-        o_lines.emplace_back(std::format("namespace {}", interface.name));
-        o_lines.emplace_back("{");
-        for (auto &enum_lines : interface_enums) {
-            for (auto &line : enum_lines) {
-                o_lines.emplace_back(std::format("    {}", line));
-            }
-        }
-        o_lines.emplace_back("}");
+    auto emit_object_forward = [](const InterfaceData &iface) {
+        return std::format("struct {};", iface.name);
+    };
+    o += "// emit_object_forward";
+    for (auto &iface : interfaces) {
+        o += emit_object_forward(iface);
     }
 
-    o_lines.emplace_back("}"); // namespace <protocol_name>
+    o += "";
+
+    o += std::format("namespace {} {{", protocol.name);
+    o += "";
+
+    bool first = true;
+    for (auto &iface : sorted_interfaces) {
+        if (!first) {
+            o += "";
+        }
+        first = false;
+        o += emit_interface(iface);
+    }
+
+    o += std::format("}} // namespace {}", protocol.name);
+
+    auto make_empty_if_blank = [](std::string &str) {
+        for (auto c : str) {
+            if (c != ' ') {
+                return;
+            }
+        }
+        str = "";
+    };
 
     std::string output;
-    for (auto &o_line : o_lines) {
+    for (auto &o_line : o.get()) {
+        make_empty_if_blank(o_line);
         output += o_line;
         output += '\n';
     }
@@ -256,14 +810,14 @@ int wl_gena_main(const std::vector<std::string> argv)
         std::format("JSON Mode: [{}]", json_mode_args_op.error());
     failue_msgs.emplace_back(std::move(json_mode_message));
 
-    auto enums_mode_args_op = parse_enums_mode(argv);
-    if (enums_mode_args_op) {
-        process_enums_mode(enums_mode_args_op.value());
+    auto header_mode_args_op = parse_header_mode(argv);
+    if (header_mode_args_op) {
+        process_header_mode(header_mode_args_op.value());
         return EXIT_SUCCESS;
     }
-    std::string enums_mode_message =
-        std::format("ENUMS Mode: [{}]", enums_mode_args_op.error());
-    failue_msgs.emplace_back(std::move(enums_mode_message));
+    std::string header_mode_message =
+        std::format("HEADER Mode: [{}]", header_mode_args_op.error());
+    failue_msgs.emplace_back(std::move(header_mode_message));
 
     std::cout << "Failue:" << '\n';
     for (auto &msg : failue_msgs) {

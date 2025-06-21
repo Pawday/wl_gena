@@ -64,10 +64,10 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
         return _ctx.out();                                                     \
     }
 
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeInt, "int")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeUInt, "uint")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::Int, "int")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::UInt, "uint")
 
-        auto operator()(const Wayland::ScannerTypes::ArgTypeUIntEnum &v)
+        auto operator()(const Wayland::ScannerTypes::ArgTypes::UIntEnum &v)
             -> FmtContext::iterator
         {
             std::format_to(_ctx.out(), "{{");
@@ -85,9 +85,9 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
             return _ctx.out();
         }
 
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeFixed, "fixed")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeString, "string")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeNullString, "?str")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::Fixed, "fixed")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::String, "string")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::NullString, "?str")
 
         auto format_with_interface(
             const std::string_view name,
@@ -106,23 +106,23 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
             return _ctx.out();
         }
 
-        auto operator()(const Wayland::ScannerTypes::ArgTypeObject &o)
+        auto operator()(const Wayland::ScannerTypes::ArgTypes::Object &o)
             -> FmtContext ::iterator
         {
             return format_with_interface("obj", o.interface_name);
         }
-        auto operator()(const Wayland::ScannerTypes::ArgTypeNullObject &o)
+        auto operator()(const Wayland::ScannerTypes::ArgTypes::NullObject &o)
             -> FmtContext ::iterator
         {
             return format_with_interface("?obj", o.interface_name);
         }
-        auto operator()(const Wayland::ScannerTypes::ArgTypeNewID &i)
+        auto operator()(const Wayland::ScannerTypes::ArgTypes::NewID &i)
             -> FmtContext ::iterator
         {
             return format_with_interface("id", i.interface_name);
         }
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeArray, "arr")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypeFD, "fd")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::Array, "arr")
+        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::FD, "fd")
 #undef ADD_OVERLOAD
 
       private:
