@@ -469,23 +469,229 @@ std::unordered_set<std::string>
     return o;
 }
 
+struct NewIDAsReturnType
+{
+    Wayland::ScannerTypes::ArgTypes::NewID arg;
+    std::string name;
+};
+
+struct EmitInterfaceRequestContext
+{
+    EmitInterfaceRequestContext(
+        const Wayland::ScannerTypes::Request &i_request,
+        std::optional<NewIDAsReturnType> &i_return_type_op)
+        : request(i_request), return_type_op(i_return_type_op)
+    {
+    }
+
+    const Wayland::ScannerTypes::Request &request;
+    std::optional<NewIDAsReturnType> &return_type_op;
+    std::string interface_name;
+    std::string first_arg_name;
+    std::string request_index_name;
+    std::string new_id_inteface_name;
+    std::string spec_interface_id;
+};
+
+StringList
+    emit_interface_request_signature_args(const EmitInterfaceRequestContext &C)
+{
+    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
+
+    StringList args_strings;
+    args_strings += "// emit_interface_request_signature_args";
+
+    std::vector<std::expected<std::string, std::string>> signature_args;
+
+    std::string first_arg =
+        std::format("{} *{}", C.interface_name, C.first_arg_name);
+    signature_args.emplace_back(std::move(first_arg));
+
+    for (auto &arg : C.request.args) {
+        const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
+        if (arg_new_id_p != nullptr) {
+            auto arg_interface_name = arg_new_id_p->interface_name;
+            if (!arg_interface_name) {
+                signature_args.emplace_back(
+                    std::format(
+                        "const struct wl_interface *{}",
+                        C.new_id_inteface_name));
+                signature_args.emplace_back("uint32_t version");
+                continue;
+            }
+
+            std::string diagnostic = std::format(
+                "(name=[{}] type=[new_id] interface=[{}])",
+                arg.name,
+                arg_interface_name.value());
+            signature_args.emplace_back(std::unexpected{diagnostic});
+
+            continue;
+        }
+
+        std::string arg_typename = std::visit(TypeToStringVisitor{}, arg.type);
+        signature_args.emplace_back(
+            std::format("{} {}", arg_typename, arg.name));
+    }
+
+    auto args_inv = std::ranges::views::reverse(signature_args);
+    bool first = true;
+    for (auto &arg : args_inv) {
+        if (!arg.has_value()) {
+            continue;
+        }
+
+        if (!first) {
+            arg.value() = std::format("{},", arg.value());
+        }
+        first = false;
+    }
+
+    for (auto arg : signature_args) {
+        if (!arg) {
+            args_strings += std::format("// [[nogen]]: {}", arg.error());
+            continue;
+        }
+        args_strings += std::move(arg.value());
+    }
+
+    return args_strings;
+}
+
+StringList emit_interface_request_body(const EmitInterfaceRequestContext &C)
+{
+    StringList o;
+    o += "// emit_interface_request_body";
+
+    std::string first_arg_proxy_id =
+        std::format("{}_as_proxy", C.first_arg_name);
+    std::string first_arg_proxy;
+    first_arg_proxy += std::format("wl_proxy *{}", first_arg_proxy_id);
+    first_arg_proxy += " = reinterpret_cast<wl_proxy*>(";
+    first_arg_proxy += std::format("{}", C.first_arg_name);
+    first_arg_proxy += ");";
+    o += std::move(first_arg_proxy);
+
+    std::optional<std::string> output_identifier;
+    if (C.return_type_op.has_value()) {
+        output_identifier =
+            std::format("out_{}", C.return_type_op.value().name);
+        o += std::format("wl_proxy *{} = nullptr;", output_identifier.value());
+    }
+
+    std::string wl_proxy_marshal_flags_call_start =
+        "_core->wl_proxy_marshal_flags(";
+    if (output_identifier) {
+        wl_proxy_marshal_flags_call_start = std::format(
+            "{} = {}",
+            output_identifier.value(),
+            wl_proxy_marshal_flags_call_start);
+    }
+    o += std::move(wl_proxy_marshal_flags_call_start);
+
+    StringList args;
+    args += std::format("{}", first_arg_proxy_id);
+    args += std::string{C.request_index_name};
+
+    if (C.return_type_op) {
+        const NewIDAsReturnType &return_type = C.return_type_op.value();
+        if (return_type.arg.interface_name) {
+            args += std::format(
+                "/*TODO generate spec_interface_id with name [{}] here */ "
+                "nullptr",
+                C.spec_interface_id);
+        } else {
+            args += std::string{C.new_id_inteface_name};
+        }
+    } else {
+        args += "nullptr";
+    }
+
+    if (C.return_type_op &&
+        !C.return_type_op.value().arg.interface_name.has_value()) {
+        args += "version";
+    } else {
+        args +=
+            std::format("_core->wl_proxy_get_version({})", first_arg_proxy_id);
+    }
+
+    bool is_destructor = false;
+    if (C.request.type.has_value()) {
+        using Message = Wayland::ScannerTypes::Message;
+        Message::Type type = C.request.type.value();
+        is_destructor = std::get_if<Message::TypeDestructor>(&type) != nullptr;
+    }
+
+    if (is_destructor) {
+        args += "/* WL_MARSHAL_FLAG_DESTROY */ (1 << 0)";
+    } else {
+        args += "0";
+    }
+
+    using Arg = Wayland::ScannerTypes::Arg;
+    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+    for (const Arg &arg : C.request.args) {
+        const ArgTypes::NewID *new_id_arg =
+            std::get_if<ArgTypes::NewID>(&arg.type);
+        bool is_new_id = new_id_arg != nullptr;
+        if (is_new_id) {
+            bool no_interface = !new_id_arg->interface_name.has_value();
+            if (no_interface) {
+                args += "interface->name";
+                args += "version";
+            }
+            args += "nullptr";
+            continue;
+        }
+
+        args += std::string{arg.name};
+    }
+
+    auto args_rev = std::ranges::views::reverse(args.get());
+    bool first = true;
+    for (auto &arg : args_rev) {
+        if (!first) {
+            arg = std::format("{},", arg);
+        }
+        first = false;
+    }
+
+    args.leftPad("    ");
+    o += std::move(args);
+    o += ");";
+
+    if (C.return_type_op &&
+        !C.return_type_op.value().arg.interface_name.has_value()) {
+        o += std::format(
+            "return reinterpret_cast<void*>({});", output_identifier.value());
+    } else if (C.return_type_op) {
+        o += std::format(
+            "return reinterpret_cast<{}*>({});",
+            C.return_type_op.value().arg.interface_name.value(),
+            output_identifier.value());
+    }
+
+    return o;
+}
+
 StringList emit_interface_request(
     const Wayland::ScannerTypes::Request &req,
-    const std::string &interface_name)
+    const std::string &interface_name,
+    const std::string &request_index_id)
 {
     using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
     StringList o;
     o += "// emit_interface_request";
 
-    std::optional<NewID> first_new_id_arg_op;
+    std::optional<NewIDAsReturnType> return_type;
     std::vector<std::string> new_id_arg_names;
     for (auto &arg : req.args) {
         const NewID *new_id_arg_p = std::get_if<NewID>(&arg.type);
         if (new_id_arg_p == nullptr) {
             continue;
         }
-        if (!first_new_id_arg_op) {
-            first_new_id_arg_op = *new_id_arg_p;
+        if (!return_type) {
+            return_type = {*new_id_arg_p, arg.name};
         }
         new_id_arg_names.emplace_back(arg.name);
     }
@@ -511,74 +717,36 @@ StringList emit_interface_request(
         return o;
     }
 
-    std::string req_ret_type = "void";
-    if (first_new_id_arg_op.has_value()) {
-        req_ret_type = "void*";
-        auto &new_id = first_new_id_arg_op.value();
+    std::string return_type_string = "void";
+    if (return_type.has_value()) {
+        return_type_string = "void *";
+        auto &new_id = return_type.value().arg;
         if (new_id.interface_name.has_value()) {
-            req_ret_type = std::format("{}*", new_id.interface_name.value());
+            return_type_string =
+                std::format("{}*", new_id.interface_name.value());
         }
     }
 
-    struct MetaArg
-    {
-        std::string content;
-        bool nogen = false;
-    };
+    EmitInterfaceRequestContext C{req, return_type};
+    C.interface_name = interface_name;
+    C.first_arg_name = std::format("{}_ptr", interface_name);
+    C.request_index_name = request_index_id;
+    C.new_id_inteface_name = "interface";
+    C.spec_interface_id = std::format("{}_interface_spec", interface_name);
 
-    std::vector<MetaArg> meta_args;
+    auto signature_args = emit_interface_request_signature_args(C);
+    signature_args.leftPad("    ");
 
-    std::string first_arg = std::format("{0} *obj", interface_name);
-    meta_args.emplace_back(std::move(first_arg));
+    o += std::format("{} {}(", return_type_string, req.name);
+    o += std::move(signature_args);
+    o += ")";
 
-    for (auto &arg : req.args) {
-        const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
-        if (arg_new_id_p != nullptr) {
-            auto arg_interface_name = arg_new_id_p->interface_name;
-            if (!arg_interface_name) {
-                meta_args.emplace_back("const struct wl_interface *interface");
-                meta_args.emplace_back("uint32_t version");
-                continue;
-            }
+    StringList body = emit_interface_request_body(C);
 
-            std::string nogen_diag = std::format(
-                "// [[nogen]] (name=[{}] type=[new_id] interface=[{}])",
-                arg.name,
-                arg_interface_name.value());
-            MetaArg new_id_nogen_arg{std::move(nogen_diag)};
-            new_id_nogen_arg.nogen = true;
-            meta_args.emplace_back(std::move(new_id_nogen_arg));
-
-            continue;
-        }
-
-        std::string arg_typename = std::visit(TypeToStringVisitor{}, arg.type);
-        meta_args.emplace_back(std::format("{} {}", arg_typename, arg.name));
-    }
-
-    auto args_inv = std::ranges::views::reverse(meta_args);
-    bool first = true;
-    for (auto &arg : args_inv) {
-        if (arg.nogen) {
-            continue;
-        }
-
-        if (!first) {
-            arg.content = std::format("{},", arg.content);
-        }
-        first = false;
-    }
-
-    StringList args_strings;
-    for (MetaArg &meta : meta_args) {
-        args_strings += std::move(meta.content);
-    }
-    meta_args.clear();
-
-    o += std::format("{} {}(", req_ret_type, req.name);
-    args_strings.leftPad("    ");
-    o += std::move(args_strings);
-    o += "); /* TODO: Generate body */";
+    o += "{";
+    body.leftPad("    ");
+    o += std::move(body);
+    o += "}";
 
     return o;
 }
@@ -592,9 +760,11 @@ StringList emit_interface_requests(const InterfaceData &iface)
     for (auto &req : iface.requests) {
         auto req_i = next_req_index;
         next_req_index++;
+        std::string request_index_id =
+            std::format("request_index_{}", req.name);
         o += std::format(
-            "static constexpr size_t request_index_{} = {};", req.name, req_i);
-        o += emit_interface_request(req, iface.name);
+            "static constexpr size_t {} = {};", request_index_id, req_i);
+        o += emit_interface_request(req, iface.name, request_index_id);
         if (next_req_index != 0) {
             o += "";
         }
