@@ -490,8 +490,29 @@ struct EmitInterfaceRequestContext
     std::string first_arg_name;
     std::string request_index_name;
     std::string new_id_inteface_name;
-    std::string spec_interface_id;
+    std::string new_id_interface_typename;
 };
+
+std::optional<std::string>
+    emit_interface_request_template_def(const EmitInterfaceRequestContext &C)
+{
+    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
+
+    for (auto &arg : C.request.args) {
+        const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
+        if (arg_new_id_p != nullptr) {
+            auto arg_interface_name = arg_new_id_p->interface_name;
+            if (!arg_interface_name) {
+                return std::format(
+                    "template <typename {}> /* {} */",
+                    C.new_id_interface_typename,
+                    __func__);
+            }
+        }
+    }
+
+    return std::nullopt;
+}
 
 StringList
     emit_interface_request_signature_args(const EmitInterfaceRequestContext &C)
@@ -514,7 +535,8 @@ StringList
             if (!arg_interface_name) {
                 signature_args.emplace_back(
                     std::format(
-                        "const struct wl_interface *{}",
+                        "const {} *{}",
+                        C.new_id_interface_typename,
                         C.new_id_inteface_name));
                 signature_args.emplace_back("uint32_t version");
                 continue;
@@ -597,9 +619,9 @@ StringList emit_interface_request_body(const EmitInterfaceRequestContext &C)
         const NewIDAsReturnType &return_type = C.return_type_op.value();
         if (return_type.arg.interface_name) {
             args += std::format(
-                "/*TODO generate spec_interface_id with name [{}] here */ "
-                "nullptr",
-                C.spec_interface_id);
+                "/* TODO generate and paste here [{}] interface descriptor"
+                "*/ nullptr",
+                return_type.arg.interface_name.value());
         } else {
             args += std::string{C.new_id_inteface_name};
         }
@@ -732,8 +754,12 @@ StringList emit_interface_request(
     C.first_arg_name = std::format("{}_ptr", interface_name);
     C.request_index_name = request_index_id;
     C.new_id_inteface_name = "interface";
-    C.spec_interface_id = std::format("{}_interface_spec", interface_name);
+    C.new_id_interface_typename = "WL_INTERFACE_T";
 
+    auto template_definition = emit_interface_request_template_def(C);
+    if (template_definition) {
+        o += std::string{template_definition.value()};
+    }
     auto signature_args = emit_interface_request_signature_args(C);
     signature_args.leftPad("    ");
 
