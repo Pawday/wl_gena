@@ -253,7 +253,7 @@ StringList
     emit_interface_listener_type_event(const Wayland::ScannerTypes::Event &ev)
 {
     StringList o;
-    o += "// emit_interface_listener_type_event";
+    o += std::format("// {}", __func__);
 
     StringList args;
 
@@ -292,7 +292,7 @@ StringList emit_interface_event_listener_type(
     }
 
     StringList o;
-    o += "// emit_interface_event_listener_type";
+    o += std::format("// {}", __func__);
     o += "struct listener";
     o += "{";
     bool first = true;
@@ -315,7 +315,7 @@ StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
     StringList o;
     std::string n = iface.name;
 
-    o += "// emit_interface_add_listener_member_fn";
+    o += std::format("// {}", __func__);
     o += std::format(
         "int add_listener({0} *{0}, const listener *listener, void *data)", n);
     o += "{";
@@ -336,7 +336,7 @@ StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
 StringList emit_interface_ctor(const InterfaceData &iface)
 {
     StringList o;
-    o += "// emit_interface_ctor";
+    o += std::format("// {}", __func__);
     o += std::format(
         "{}_interface(std::shared_ptr<CORE_T> core) : _core{{core}}{{}};",
         iface.name);
@@ -346,7 +346,7 @@ StringList emit_interface_ctor(const InterfaceData &iface)
 StringList emit_enum(const Wayland::ScannerTypes::Enum &eenum)
 {
     StringList o;
-    o += "// emit_enum";
+    o += std::format("// {}", __func__);
 
     o += std::format("enum class {}", eenum.name);
     o += "{";
@@ -499,7 +499,7 @@ StringList
     using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
 
     StringList args_strings;
-    args_strings += "// emit_interface_request_signature_args";
+    args_strings += std::format("// {}", __func__);
 
     std::vector<std::expected<std::string, std::string>> signature_args;
 
@@ -561,7 +561,7 @@ StringList
 StringList emit_interface_request_body(const EmitInterfaceRequestContext &C)
 {
     StringList o;
-    o += "// emit_interface_request_body";
+    o += std::format("// {}", __func__);
 
     std::string first_arg_proxy_id =
         std::format("{}_as_proxy", C.first_arg_name);
@@ -681,7 +681,7 @@ StringList emit_interface_request(
 {
     using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
     StringList o;
-    o += "// emit_interface_request";
+    o += std::format("// {}", __func__);
 
     std::optional<NewIDAsReturnType> return_type;
     std::vector<std::string> new_id_arg_names;
@@ -754,7 +754,7 @@ StringList emit_interface_request(
 StringList emit_interface_requests(const InterfaceData &iface)
 {
     StringList o;
-    o += "// emit_interface_requests";
+    o += std::format("// {}", __func__);
 
     size_t next_req_index = 0;
     for (auto &req : iface.requests) {
@@ -776,7 +776,7 @@ StringList emit_interface_requests(const InterfaceData &iface)
 StringList emit_interface(const InterfaceData &iface)
 {
     StringList o;
-    o += "// emit_interface";
+    o += std::format("// {}", __func__);
     {
         auto enum_deps = interface_get_enum_deps(iface);
         if (!enum_deps.empty()) {
