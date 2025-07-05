@@ -637,7 +637,7 @@ StringList emit_interface_request_body(const EmitInterfaceRequestContext &C)
         if (is_new_id) {
             bool no_interface = !new_id_arg->interface_name.has_value();
             if (no_interface) {
-                args += "interface->name";
+                args += std::format("{}->name", C.new_id_inteface_name);
                 args += "version";
             }
             args += "nullptr";
