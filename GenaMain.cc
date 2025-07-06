@@ -902,15 +902,6 @@ std::vector<InterfaceData>
         }
     }
 
-    {
-        std::ofstream ifaces_file{"ifaces.dot"};
-        ifaces_file << graph.dump();
-    }
-    {
-        std::ofstream ifaces_sorted_file{"ifaces_sorted.dot"};
-        ifaces_sorted_file << graph.topo_sorted_dg().dump();
-    }
-
     std::vector<InterfaceData> o;
     auto sorted_names = graph.topo_sorted();
     for (auto &name : sorted_names) {
