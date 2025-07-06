@@ -341,7 +341,7 @@ StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
     o += "{";
     {
         StringList b;
-        b += std::format("return _core->wl_proxy_add_listener(");
+        b += std::format("return _core.wl_proxy_add_listener(");
         b += std::format("    reinterpret_cast<wl_proxy*>({0}),", n);
         b += std::format("    (void (**)(void))listener,");
         b += std::format("    data");
@@ -359,7 +359,7 @@ StringList emit_interface_ctor(
     StringList o;
     o += std::format("// {}", __func__);
     o += std::format(
-        "{}_interface(std::shared_ptr<typename {}> core) : _core{{core}}{{}};",
+        "{}_interface(typename {} &core) : _core{{core}}{{}};",
         iface.name,
         interface_traits.wayland_client_core_functions_typename);
     return o;
@@ -607,7 +607,7 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
     }
 
     std::string wl_proxy_marshal_flags_call_start =
-        "_core->wl_proxy_marshal_flags(";
+        "_core.wl_proxy_marshal_flags(";
     if (output_identifier) {
         wl_proxy_marshal_flags_call_start = std::format(
             "{} = {}",
@@ -639,7 +639,7 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
         args += "version";
     } else {
         args +=
-            std::format("_core->wl_proxy_get_version({})", first_arg_proxy_id);
+            std::format("_core.wl_proxy_get_version({})", first_arg_proxy_id);
     }
 
     bool is_destructor = false;
@@ -916,7 +916,7 @@ StringList emit_interface(const InterfaceData &iface)
     o += "";
     o += "private:";
     o += std::format(
-        "    std::shared_ptr<typename {}> _core;",
+        "    typename {} &_core;",
         traits.wayland_client_core_functions_typename);
     o += "};";
 
@@ -969,8 +969,6 @@ void process_header_mode(const EnumsModeArgs &args)
 
     StringList o;
     o += "#pragma once";
-    o += "";
-    o += "#include <memory>";
     o += "";
     o += "#include <cstdint>";
     o += "#include <cstddef>";
