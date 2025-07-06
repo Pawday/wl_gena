@@ -446,9 +446,9 @@ struct ArgInterfaceDependencyGetterVisitor
     OVERLOAD(Fixed);
     OVERLOAD(String);
     OVERLOAD(NullString);
-    OVERLOAD(Object);
-    OVERLOAD(NullObject);
-    OVERLOAD(NewID);
+    OVERLOAD_N(Object);
+    OVERLOAD_N(NullObject);
+    OVERLOAD_N(NewID);
     OVERLOAD(Array);
     OVERLOAD(FD);
 
@@ -456,15 +456,20 @@ struct ArgInterfaceDependencyGetterVisitor
 #undef OVERLOAD_N
 };
 
-// TODO Deal with different type of dependecies (all types form a cycles)
 std::optional<std::string>
     get_arg_interface_dep(const Wayland::ScannerTypes::Arg &arg)
 {
     return std::visit(ArgInterfaceDependencyGetterVisitor{}, arg.type);
 }
 
+/*
+ * TODO: Remove code duplication in:
+ *  interface_get_dep_names
+ *  and
+ *  interface_get_enum_dep_names
+ */
 std::unordered_set<std::string>
-    interface_get_enum_deps(const InterfaceData &iface)
+    interface_get_dep_names(const InterfaceData &iface)
 {
     std::unordered_set<std::string> o;
 
@@ -479,6 +484,47 @@ std::unordered_set<std::string>
 
     for (auto &msg : msgs) {
         for (auto &arg : msg.args) {
+
+            std::optional<std::string> dep_iface_name =
+                get_arg_interface_dep(arg);
+            if (!dep_iface_name.has_value()) {
+                continue;
+            }
+            o.insert(dep_iface_name.value());
+        }
+    }
+
+    return o;
+}
+
+/*
+ * TODO: Remove code duplication in:
+ *  interface_get_dep_names
+ *  and
+ *  interface_get_enum_dep_names
+ */
+std::unordered_set<std::string>
+    interface_get_enum_dep_names(const InterfaceData &iface)
+{
+    std::unordered_set<std::string> o;
+
+    std::vector<Wayland::ScannerTypes::Message> msgs;
+    for (auto &event : iface.events) {
+        msgs.push_back(event);
+    }
+
+    for (auto &req : iface.requests) {
+        msgs.push_back(req);
+    }
+
+    for (auto &msg : msgs) {
+        for (auto &arg : msg.args) {
+
+            using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+            if (!std::holds_alternative<ArgTypes::UIntEnum>(arg.type)) {
+                continue;
+            }
+
             std::optional<std::string> dep_iface_name =
                 get_arg_interface_dep(arg);
             if (!dep_iface_name.has_value()) {
@@ -841,7 +887,7 @@ StringList emit_interface(const InterfaceData &iface)
         std::format("{}::wl_message_t", traits.typename_string);
 
     {
-        auto enum_deps = interface_get_enum_deps(iface);
+        auto enum_deps = interface_get_enum_dep_names(iface);
         if (!enum_deps.empty()) {
             o += "";
             StringList deps;
@@ -937,7 +983,9 @@ std::vector<InterfaceData>
     }
 
     for (auto &iface : ifaces) {
-        auto deps = interface_get_enum_deps(iface.second);
+        // TODO: Deal with different type of dependecies
+        // (all types form a cycles)
+        auto deps = interface_get_enum_dep_names(iface.second);
         for (auto &dep_name : deps) {
             graph.add_dependency(dep_name, iface.first);
         }
@@ -949,6 +997,41 @@ std::vector<InterfaceData>
         o.emplace_back(std::move(ifaces.at(name)));
     }
     std::ranges::reverse(o);
+    return o;
+}
+
+StringList emit_object_forward(
+    const std::vector<Wayland::ScannerTypes::Interface> &interfaces)
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+
+    std::unordered_set<std::string> emited;
+
+    std::unordered_set<std::string> emit_object_forward;
+    for (auto &iface : interfaces) {
+        emited.insert(iface.name);
+        o += std::format("struct {};", iface.name);
+    }
+
+    for (auto &iface : interfaces) {
+        auto deps = interface_get_dep_names(iface);
+
+        for (auto &emited_el : emited) {
+            deps.erase(emited_el);
+        }
+
+        if (deps.empty()) {
+            continue;
+        }
+
+        o += "";
+        o += std::format("// deps for {}", iface.name);
+        for (auto &dep : deps) {
+            o += std::format("struct {};", dep);
+        }
+    }
+
     return o;
 }
 
@@ -978,13 +1061,7 @@ void process_header_mode(const EnumsModeArgs &args)
 
     o += "";
 
-    auto emit_object_forward = [](const InterfaceData &iface) {
-        return std::format("struct {};", iface.name);
-    };
-    o += "// emit_object_forward";
-    for (auto &iface : interfaces) {
-        o += emit_object_forward(iface);
-    }
+    o += emit_object_forward(interfaces);
 
     o += "";
 
