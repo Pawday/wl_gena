@@ -670,7 +670,7 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
         const NewIDAsReturnType &return_type = D.return_type_op.value();
         if (return_type.arg.interface_name) {
             args += std::format(
-                "/* TODO generate and paste here [{}] interface descriptor"
+                "/* TODO generate and paste here [{}] interface rtti"
                 "*/ nullptr",
                 return_type.arg.interface_name.value());
         } else {
@@ -910,6 +910,7 @@ StringList emit_interface(const InterfaceData &iface)
         if (has_structure) {
             o += "";
         }
+        has_structure = true;
     };
 
     {
@@ -918,7 +919,6 @@ StringList emit_interface(const InterfaceData &iface)
             StringList eenum = emit_enum(e);
             eenum.leftPad("    ");
 
-            has_structure = true;
             o += std::move(eenum);
         }
     }
@@ -930,7 +930,6 @@ StringList emit_interface(const InterfaceData &iface)
         StringList type =
             emit_interface_event_listener_type(iface.events, traits);
         type.leftPad("    ");
-        has_structure = true;
         o += std::move(type);
     }
 
@@ -946,7 +945,6 @@ StringList emit_interface(const InterfaceData &iface)
         StringList add_listener_code =
             emit_interface_add_listener_member_fn(iface);
         add_listener_code.leftPad("    ");
-        has_structure = true;
         o += std::move(add_listener_code);
     }
 
@@ -955,7 +953,6 @@ StringList emit_interface(const InterfaceData &iface)
         EmitInterfaceRequestsData data{iface, traits};
         StringList requests = emit_interface_requests(data);
         requests.leftPad("    ");
-        has_structure = true;
         o += std::move(requests);
     }
 
