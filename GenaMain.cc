@@ -787,7 +787,7 @@ StringList emit_interface_request(const EmitSingleRequestData &D)
          * Reference implementation seems to ignore requests with
          * more than one argument with type="new_id"
          *
-         * So it seems rigth to do the same thing here
+         * So it seems right to do the same thing here
          */
         o += "/*";
         o += std::format(
