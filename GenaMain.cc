@@ -537,17 +537,17 @@ std::unordered_set<std::string>
     return o;
 }
 
-struct NewIDAsReturnType
+struct NewIDArg
 {
-    Wayland::ScannerTypes::ArgTypes::NewID arg;
     std::string name;
+    Wayland::ScannerTypes::ArgTypes::NewID arg;
 };
 
 struct EmitRequestFunctionData
 {
     EmitRequestFunctionData(
         const Wayland::ScannerTypes::Request &i_request,
-        const std::optional<NewIDAsReturnType> &i_return_type_op,
+        const std::optional<NewIDArg> &i_return_type_op,
         const InterfaceTraits &i_interface_traits)
         : request(i_request), return_type_op(i_return_type_op),
           interface_traits{i_interface_traits}
@@ -555,7 +555,7 @@ struct EmitRequestFunctionData
     }
 
     const Wayland::ScannerTypes::Request &request;
-    const std::optional<NewIDAsReturnType> &return_type_op;
+    const std::optional<NewIDArg> &return_type_op;
     const InterfaceTraits &interface_traits;
     std::string interface_name;
     std::string first_arg_name;
@@ -667,11 +667,11 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
     args += std::string{D.request_index_name};
 
     if (D.return_type_op) {
-        const NewIDAsReturnType &return_type = D.return_type_op.value();
+        const NewIDArg &return_type = D.return_type_op.value();
         if (return_type.arg.interface_name) {
             args += std::format(
-                "/* TODO generate and paste here [{}] interface rtti"
-                "*/ nullptr",
+                "/* TODO generate and paste here [{}] interface rtti */"
+                "nullptr",
                 return_type.arg.interface_name.value());
         } else {
             args += std::string{D.new_id_inteface_name};
@@ -764,24 +764,30 @@ struct EmitSingleRequestData
 
 StringList emit_interface_request(const EmitSingleRequestData &D)
 {
-    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
     StringList o;
     o += std::format("// {}", __func__);
 
-    std::optional<NewIDAsReturnType> return_type;
-    std::vector<std::string> new_id_arg_names;
-    for (auto &arg : D.request.args) {
-        const NewID *new_id_arg_p = std::get_if<NewID>(&arg.type);
-        if (new_id_arg_p == nullptr) {
-            continue;
-        }
-        if (!return_type) {
-            return_type = {*new_id_arg_p, arg.name};
-        }
-        new_id_arg_names.emplace_back(arg.name);
+    using Arg = Wayland::ScannerTypes::Arg;
+    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
+
+    auto is_new_id = [](const Arg &arg) {
+        return std::holds_alternative<NewID>(arg.type);
+    };
+
+    auto to_new_id_arg = [](const Arg &arg) {
+        return NewIDArg{arg.name, std::get<NewID>(arg.type)};
+    };
+
+    namespace V = std::views;
+    std::vector<NewIDArg> new_ids = std::ranges::to<std::vector>(
+        D.request.args | V::filter(is_new_id) | V::transform(to_new_id_arg));
+
+    std::optional<NewIDArg> return_type;
+    if (!new_ids.empty()) {
+        return_type = new_ids[0];
     }
 
-    if (new_id_arg_names.size() > 1) {
+    if (new_ids.size() > 1) {
         /*
          * I have no idea why it is that way:
          * Reference implementation seems to ignore requests with
@@ -794,8 +800,8 @@ StringList emit_interface_request(const EmitSingleRequestData &D)
             " * Multiple new_id args: Ignore [{}] request generation",
             D.request.name);
         size_t new_id_name_i = 0;
-        for (auto &new_id_name : new_id_arg_names) {
-            o += std::format(" * new_id[{}] {}", new_id_name_i, new_id_name);
+        for (auto &new_id : new_ids) {
+            o += std::format(" * new_id[{}] {}", new_id_name_i, new_id.name);
             new_id_name_i++;
         }
         o += " */";
