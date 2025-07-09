@@ -111,13 +111,13 @@ void process_json_mode(const JsonModeArgs &args)
     std::cout << std::format("{}\n", protocol);
 }
 
-struct EnumsModeArgs
+struct HeaderModeArgs
 {
     std::string proto_file_name;
     std::string output_file_name;
 };
 
-std::expected<EnumsModeArgs, std::string>
+std::expected<HeaderModeArgs, std::string>
     parse_header_mode(std::vector<std::string> args)
 {
     auto flag_it = std::ranges::find(args, "--header");
@@ -147,7 +147,7 @@ std::expected<EnumsModeArgs, std::string>
         return std::unexpected(std::move(message));
     }
 
-    EnumsModeArgs out{};
+    HeaderModeArgs out{};
 
     out.proto_file_name = args.at(0);
     out.output_file_name = args.at(1);
@@ -1038,7 +1038,7 @@ StringList emit_object_forward(
     return o;
 }
 
-void process_header_mode(const EnumsModeArgs &args)
+void process_header_mode(const HeaderModeArgs &args)
 {
     std::string protocol_xml = read_text_file(args.proto_file_name);
     std::ofstream output_file{args.output_file_name};
