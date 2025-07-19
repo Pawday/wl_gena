@@ -219,6 +219,10 @@ struct std::formatter<Wayland::ScannerTypes::Message> : FormatterNoParseArgs
         FormatVectorWrap<Wayland::ScannerTypes::Arg> arg_fmt{s.args};
         std::format_to(ctx.out(), ",");
         std::format_to(ctx.out(), "\"args\":{}", arg_fmt);
+        if (s.since) {
+            std::format_to(ctx.out(), ",");
+            std::format_to(ctx.out(), "\"since\":{}", s.since.value());
+        }
         std::format_to(ctx.out(), "}}");
         return ctx.out();
     }

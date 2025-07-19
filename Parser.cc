@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <cstddef>
+#include <cstdint>
 
 #include <expat.h>
 #include <expat_external.h>
@@ -263,7 +264,20 @@ struct ProtoParser
             }
         }
 
+        std::optional<uint32_t> since;
+        if (attrs.contains("since")) {
+            std::string since_str = attrs.at("since");
+            auto since_parsed = parse_num<uint32_t>(since_str);
+            if (!since_parsed) {
+                std::string message = std::format(
+                    "Bad since [{}]: {}", since_str, since_parsed.error());
+                throw std::runtime_error{std::move(message)};
+            }
+            since = since_parsed.value();
+        }
+
         new_request.name = std::move(request_name);
+        new_request.since = since;
         targets.emplace(std::move(new_request));
     }
 
@@ -306,7 +320,20 @@ struct ProtoParser
         ScannerTypes::Event new_event;
         std::string event_name = attrs.at("name");
 
+        std::optional<uint32_t> since;
+        if (attrs.contains("since")) {
+            std::string since_str = attrs.at("since");
+            auto since_parsed = parse_num<uint32_t>(since_str);
+            if (!since_parsed) {
+                std::string message = std::format(
+                    "Bad since [{}]: {}", since_str, since_parsed.error());
+                throw std::runtime_error{std::move(message)};
+            }
+            since = since_parsed.value();
+        }
+
         new_event.name = std::move(event_name);
+        new_event.since = since;
         targets.emplace(std::move(new_event));
     }
 

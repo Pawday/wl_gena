@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -79,6 +80,7 @@ struct Message
     std::string name;
     std::optional<Type> type;
     std::vector<Arg> args;
+    std::optional<uint32_t> since;
 };
 
 // clang-format off
