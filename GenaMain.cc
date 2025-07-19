@@ -1038,6 +1038,332 @@ StringList emit_object_forward(
     return o;
 }
 
+namespace rtti {
+
+struct ArgsSiglantureVisitor
+{
+    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+#define OVERLOAD(TYPE, type_literal)                                           \
+    std::string operator()(const ArgTypes::TYPE &)                             \
+    {                                                                          \
+        return type_literal;                                                   \
+    }
+
+    OVERLOAD(Int, "i");
+    OVERLOAD(UInt, "u");
+    OVERLOAD(UIntEnum, "u");
+    OVERLOAD(Fixed, "f");
+    OVERLOAD(String, "s");
+    OVERLOAD(NullString, "?s");
+    OVERLOAD(Object, "o");
+    OVERLOAD(NullObject, "?o");
+    std::string operator()(const ArgTypes::NewID &id)
+    {
+        if (!id.interface_name) {
+            return "sun";
+        }
+        return "i";
+    };
+    OVERLOAD(Array, "a");
+    OVERLOAD(FD, "h");
+#undef OVERLOAD
+};
+
+struct ArgsTypesVisitor
+{
+    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+    using InterfaceNameable = Wayland::ScannerTypes::InterfaceNameable;
+
+#define OVERLOAD(TYPE)                                                         \
+    std::optional<std::string> operator()(const ArgTypes::TYPE &)              \
+    {                                                                          \
+        return std::nullopt;                                                   \
+    }
+
+#define OVERLOAD_IFACE(TYPE)                                                   \
+    std::optional<std::string> operator()(const ArgTypes::TYPE &o)             \
+    {                                                                          \
+        return iface_typename(o);                                              \
+    }
+
+    OVERLOAD(Int);
+    OVERLOAD(UInt);
+    OVERLOAD(UIntEnum);
+    OVERLOAD(Fixed);
+    OVERLOAD(String);
+    OVERLOAD(NullString);
+    OVERLOAD_IFACE(Object);
+    OVERLOAD(NullObject);
+    OVERLOAD_IFACE(NewID);
+    OVERLOAD(Array);
+    OVERLOAD(FD);
+
+#undef OVERLOAD
+#undef OVERLOAD_IFACE
+
+    std::optional<std::string> iface_typename(InterfaceNameable n)
+    {
+        return n.interface_name;
+    }
+};
+
+struct Arg
+{
+    std::string name;
+    std::optional<std::string> rtti_type;
+};
+
+struct Message
+{
+    Message(const Wayland::ScannerTypes::Message &msg)
+    {
+        name = msg.name;
+        for (auto &arg : msg.args) {
+            args_signature += std::visit(ArgsSiglantureVisitor{}, arg.type);
+        }
+
+        for (auto &arg : msg.args) {
+            auto arg_rtti_type_op = std::visit(ArgsTypesVisitor{}, arg.type);
+            if (arg_rtti_type_op.has_value()) {
+                only_primitives = false;
+            }
+            Arg rtti_arg;
+            rtti_arg.name = arg.name;
+            rtti_arg.rtti_type = arg_rtti_type_op;
+            rtti_args.push_back(std::move(rtti_arg));
+        }
+    }
+    std::string name;
+    bool only_primitives = true;
+    std::vector<Arg> rtti_args;
+    std::string args_signature;
+};
+
+struct Interface
+{
+    Interface(const InterfaceData &iface)
+    {
+        name = iface.name;
+        version = iface.version;
+        for (auto &req : iface.requests) {
+            requests.push_back(Message{req});
+        }
+
+        for (auto &ev : iface.events) {
+            events.push_back(Message{ev});
+        }
+    }
+
+    std::string name;
+    uint32_t version;
+    std::vector<Message> requests;
+    std::vector<Message> events;
+};
+
+struct Protocol
+{
+    Protocol(const std::vector<InterfaceData> &i_interfaces)
+    {
+        for (auto &iface : i_interfaces) {
+            interfaces.emplace_back(iface);
+        }
+
+        for (auto &iface : interfaces) {
+            for (auto &ev : iface.events) {
+                if (ev.only_primitives) {
+                    null_run_length =
+                        std::max(null_run_length, ev.rtti_args.size());
+                }
+            }
+
+            for (auto &req : iface.requests) {
+                if (req.only_primitives) {
+                    null_run_length =
+                        std::max(null_run_length, req.rtti_args.size());
+                }
+            }
+        }
+    }
+
+    std::vector<Interface> interfaces;
+    size_t null_run_length;
+};
+} // namespace rtti
+
+StringList
+    emit_rtti_interface_struct_members_forward(const rtti::Interface &interface)
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+    o += std::format(
+        "static const typename traits::wl_interface_t {}_interface;",
+        interface.name);
+
+    if (!interface.requests.empty()) {
+        o += std::format(
+            "static const typename traits::wl_message_t {}_requests[];",
+            interface.name);
+    }
+
+    if (!interface.events.empty()) {
+        o += std::format(
+            "static const typename traits::wl_message_t {}_events[];",
+            interface.name);
+    }
+
+    return o;
+}
+
+StringList emit_rtti_struct(const rtti::Protocol &proto)
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+
+    o += "template <typename traits>";
+    o += "struct rtti {";
+    o += "    static const typename traits::wl_interface_t *types[];";
+    o += "";
+    bool first = true;
+    for (auto &interface : proto.interfaces) {
+        auto iface_members =
+            emit_rtti_interface_struct_members_forward(interface);
+        iface_members.leftPad("    ");
+        if (!first) {
+            o += "";
+        }
+        first = false;
+        o += std::move(iface_members);
+    }
+
+    o += "};";
+
+    return o;
+}
+
+StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+
+    std::string sig;
+    sig += "const typename traits::wl_interface_t *";
+    sig += "rtti<traits>::types[]";
+
+    o += "template <typename traits>";
+    o += std::format("{} {{", sig);
+    o += [&proto]() {
+        StringList types_list;
+        for (size_t nul_i = 0; nul_i != proto.null_run_length; ++nul_i) {
+            types_list += "nullptr, // null_run";
+        }
+        types_list.leftPad("    ");
+        return types_list;
+    }();
+
+    o += [&proto]() {
+        StringList o_l;
+        for (auto &iface : proto.interfaces) {
+            for (auto &req : iface.requests) {
+                if (req.only_primitives) {
+                    continue;
+                }
+                o_l += std::format("/* request [{}] */", req.name);
+
+                for (auto &arg : req.rtti_args) {
+                    std::string type = "nullptr";
+                    if (arg.rtti_type) {
+                        type = std::format(
+                            "&rtti<traits>::{}_interface",
+                            arg.rtti_type.value());
+                    }
+                    o_l += std::format("{}, // {}", type, arg.name);
+                }
+            }
+
+            for (auto ev : iface.events) {
+                if (ev.only_primitives) {
+                    continue;
+                }
+                o_l += std::format("/* event [{}] */", ev.name);
+                for (auto &arg : ev.rtti_args) {
+                    std::string type = "nullptr";
+                    if (arg.rtti_type) {
+                        type = std::format(
+                            "&rtti<traits>::{}_interface",
+                            arg.rtti_type.value());
+                    }
+                    o_l += std::format("{}, // {}", type, arg.name);
+                }
+            }
+        }
+        o_l.leftPad("    ");
+        return o_l;
+    }();
+
+    o += "};";
+    return o;
+}
+
+StringList emit_rtti_interface_struct_members(const rtti::Interface &interface)
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+    o += std::format("/* TODO: Generate rtti events and requests for {}_interface here*/", interface.name);
+
+    o += "";
+    o += "template <typename traits>";
+    o += std::format(
+        "const typename traits::wl_interface_t rtti<traits>::{}_interface {{",
+        interface.name);
+    o += [&interface]() {
+        StringList o_memb;
+        o_memb += std::format("\"{}\", {},", interface.name, interface.version);
+        if (!interface.requests.empty()) {
+            o_memb += std::format(
+                "{}, rtti<traits>::{}_requests,",
+                interface.requests.size(),
+                interface.name);
+        } else {
+            o_memb += "0, nullptr,";
+        }
+
+        if (!interface.events.empty()) {
+            o_memb += std::format(
+                "{}, rtti<traits>::{}_events,",
+                interface.events.size(),
+                interface.name);
+        } else {
+            o_memb += "0, nullptr";
+        }
+
+        o_memb.leftPad("    ");
+        return o_memb;
+    }();
+    o += "};";
+    return o;
+}
+
+StringList emit_rtti(const rtti::Protocol &proto)
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+
+    o += emit_rtti_interface_struct_types_member(proto);
+
+    o += "";
+    bool first = true;
+    for (auto &iface : proto.interfaces) {
+        auto iface_members = emit_rtti_interface_struct_members(iface);
+        if (!first) {
+            o += "";
+        }
+        first = false;
+        o += std::move(iface_members);
+    }
+
+    return o;
+}
+
 void process_header_mode(const HeaderModeArgs &args)
 {
     std::string protocol_xml = read_text_file(args.proto_file_name);
@@ -1063,14 +1389,16 @@ void process_header_mode(const HeaderModeArgs &args)
     o += "struct wl_proxy;";
 
     o += "";
-
     o += emit_object_forward(interfaces);
 
     o += "";
-
     o += std::format("namespace {} {{", protocol.name);
-    o += "";
 
+    o += "";
+    auto rtti_struct = emit_rtti_struct(interfaces);
+    o += std::move(rtti_struct);
+
+    o += "";
     bool first = true;
     for (auto &iface : sorted_interfaces) {
         if (!first) {
@@ -1079,6 +1407,9 @@ void process_header_mode(const HeaderModeArgs &args)
         first = false;
         o += emit_interface(iface);
     }
+
+    o += "";
+    o += emit_rtti(interfaces);
 
     o += std::format("}} // namespace {}", protocol.name);
 

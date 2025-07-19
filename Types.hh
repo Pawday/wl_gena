@@ -89,7 +89,7 @@ struct Event : Message {};
 struct Interface
 {
     std::string name;
-    uint32_t verison;
+    uint32_t version;
     std::vector<Request> requests;
     std::vector<Event> events;
     std::vector<Enum> enums;

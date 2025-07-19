@@ -209,7 +209,7 @@ struct ProtoParser
         new_interface.name = std::move(name);
         std::string vesion_string = attrs.at("version");
 
-        auto version_op = parse_num<decltype(ScannerTypes::Interface::verison)>(
+        auto version_op = parse_num<decltype(ScannerTypes::Interface::version)>(
             vesion_string);
 
         std::optional<std::string> error_string{};
@@ -228,7 +228,7 @@ struct ProtoParser
             throw std::runtime_error(std::move(message));
         }
 
-        new_interface.verison = version_op.value();
+        new_interface.version = version_op.value();
 
         targets.emplace(std::move(new_interface));
     }

@@ -264,7 +264,7 @@ struct std::formatter<Wayland::ScannerTypes::Interface> : FormatterNoParseArgs
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", i.name);
         std::format_to(ctx.out(), ",");
-        std::format_to(ctx.out(), "\"version\":{}", i.verison);
+        std::format_to(ctx.out(), "\"version\":{}", i.version);
         FormatVectorWrap<Wayland::ScannerTypes::Request> request_fmt{
             i.requests};
         std::format_to(ctx.out(), ",");
