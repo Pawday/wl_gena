@@ -670,8 +670,8 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
         const NewIDArg &return_type = D.return_type_op.value();
         if (return_type.arg.interface_name) {
             args += std::format(
-                "/* TODO generate and paste here [{}] interface rtti */"
-                "nullptr",
+                "&rtti<{}>::{}_interface",
+                D.interface_traits.typename_string,
                 return_type.arg.interface_name.value());
         } else {
             args += std::string{D.new_id_inteface_name};
@@ -1040,7 +1040,7 @@ StringList emit_object_forward(
 
 namespace rtti {
 
-struct ArgsSiglantureVisitor
+struct ArgsSignantureVisitor
 {
     using ArgTypes = Wayland::ScannerTypes::ArgTypes;
 #define OVERLOAD(TYPE, type_literal)                                           \
@@ -1093,7 +1093,7 @@ struct ArgsTypesVisitor
     OVERLOAD(String);
     OVERLOAD(NullString);
     OVERLOAD_IFACE(Object);
-    OVERLOAD(NullObject);
+    OVERLOAD_IFACE(NullObject);
     OVERLOAD_IFACE(NewID);
     OVERLOAD(Array);
     OVERLOAD(FD);
@@ -1118,8 +1118,13 @@ struct Message
     Message(const Wayland::ScannerTypes::Message &msg)
     {
         name = msg.name;
+
+        if (msg.since && msg.since.value() > 1) {
+            args_signature += std::format("{}", msg.since.value());
+        }
+
         for (auto &arg : msg.args) {
-            args_signature += std::visit(ArgsSiglantureVisitor{}, arg.type);
+            args_signature += std::visit(ArgsSignantureVisitor{}, arg.type);
         }
 
         for (auto &arg : msg.args) {
@@ -1249,34 +1254,45 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
     sig += "const typename traits::wl_interface_t *";
     sig += "rtti<traits>::types[]";
 
+    size_t types_array_offset = 0;
+
     o += "template <typename traits>";
     o += std::format("{} {{", sig);
-    o += [&proto]() {
+    o += [&proto, &types_array_offset]() {
         StringList types_list;
         for (size_t nul_i = 0; nul_i != proto.null_run_length; ++nul_i) {
-            types_list += "nullptr, // null_run";
+            types_list += std::format(
+                "/* [{}][primitives_stub] */ nullptr,", types_array_offset);
+            types_array_offset++;
         }
         types_list.leftPad("    ");
         return types_list;
     }();
 
-    o += [&proto]() {
+    o += [&proto, &types_array_offset]() {
         StringList o_l;
+
         for (auto &iface : proto.interfaces) {
             for (auto &req : iface.requests) {
                 if (req.only_primitives) {
                     continue;
                 }
-                o_l += std::format("/* request [{}] */", req.name);
-
                 for (auto &arg : req.rtti_args) {
+                    std::string info_comment = std::format(
+                        "/* [{}][{}.{}.{}] */",
+                        types_array_offset,
+                        iface.name,
+                        req.name,
+                        arg.name);
+
                     std::string type = "nullptr";
                     if (arg.rtti_type) {
                         type = std::format(
                             "&rtti<traits>::{}_interface",
                             arg.rtti_type.value());
                     }
-                    o_l += std::format("{}, // {}", type, arg.name);
+                    o_l += std::format("{} {},", info_comment, type);
+                    types_array_offset++;
                 }
             }
 
@@ -1284,15 +1300,21 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
                 if (ev.only_primitives) {
                     continue;
                 }
-                o_l += std::format("/* event [{}] */", ev.name);
                 for (auto &arg : ev.rtti_args) {
+                    std::string info_comment = std::format(
+                        "/* [{}][{}.{}.{}] */",
+                        types_array_offset,
+                        iface.name,
+                        ev.name,
+                        arg.name);
                     std::string type = "nullptr";
                     if (arg.rtti_type) {
                         type = std::format(
                             "&rtti<traits>::{}_interface",
                             arg.rtti_type.value());
                     }
-                    o_l += std::format("{}, // {}", type, arg.name);
+                    o_l += std::format("{} {},", info_comment, type);
+                    types_array_offset++;
                 }
             }
         }
@@ -1308,9 +1330,78 @@ StringList emit_rtti_interface_struct_members(const rtti::Interface &interface)
 {
     StringList o;
     o += std::format("// {}", __func__);
-    o += std::format("/* TODO: Generate rtti events and requests for {}_interface here*/", interface.name);
 
-    o += "";
+    bool has_entity = false;
+    auto add_sep = [&has_entity, &o]() {
+        if (has_entity) {
+            o += "";
+        }
+        has_entity = true;
+    };
+
+    auto emit_rtti_message_elements =
+        [](const std::vector<rtti::Message> &msgs) -> StringList {
+        StringList ro;
+        if (msgs.empty()) {
+            return ro;
+        }
+
+        for (auto &msg : msgs) {
+            std::string rtti_ref_offset = "/* TODO: FIX BAD OFFSET = */ 0";
+            if (msg.only_primitives) {
+                rtti_ref_offset = "/* primitives_stub */ 0";
+            }
+            std::string rtti_ref_str =
+                std::format("rtti<traits>::types + {}", rtti_ref_offset);
+            ro += std::format(
+                "{{\"{}\", \"{}\", {}}}",
+                msg.name,
+                msg.args_signature,
+                rtti_ref_str);
+        }
+
+        auto rev = std::views::reverse(ro.get());
+        bool first = true;
+        for (std::string &elem : rev) {
+            if (!first) {
+                elem = elem + ",";
+            }
+            first = false;
+        }
+
+        return ro;
+    };
+
+    if (!interface.requests.empty()) {
+        add_sep();
+        o += "template <typename traits>";
+        o += std::format(
+            "const typename traits::wl_message_t rtti<traits>::{}_requests[] = "
+            "{{",
+            interface.name);
+
+        StringList requests_list =
+            emit_rtti_message_elements(interface.requests);
+        requests_list.leftPad("    ");
+        o += std::move(requests_list);
+        o += "};";
+    }
+
+    if (!interface.events.empty()) {
+        add_sep();
+        o += "template <typename traits>";
+        o += std::format(
+            "const typename traits::wl_message_t rtti<traits>::{}_events[] = "
+            "{{",
+            interface.name);
+
+        StringList requests_list = emit_rtti_message_elements(interface.events);
+        requests_list.leftPad("    ");
+        o += std::move(requests_list);
+        o += "};";
+    }
+
+    add_sep();
     o += "template <typename traits>";
     o += std::format(
         "const typename traits::wl_interface_t rtti<traits>::{}_interface {{",
