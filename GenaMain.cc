@@ -1203,6 +1203,145 @@ struct Interface
     std::vector<Message> events;
 };
 
+struct TypeArrayInfo
+{
+    struct Entry
+    {
+        std::optional<size_t> index;
+        std::string type;
+
+        std::string interface_name;
+        std::string message_name;
+        std::string arg_name;
+    };
+
+    TypeArrayInfo(const std::vector<Interface> &interfaces)
+    {
+        auto get_max_null_run = [](const std::vector<Message> &msgs) {
+            size_t o = 0;
+            for (auto &ev : msgs) {
+                if (ev.only_primitives) {
+                    o = std::max(o, ev.rtti_args.size());
+                }
+            }
+            return o;
+        };
+
+        null_run_length = 0;
+        for (auto &iface : interfaces) {
+            null_run_length =
+                std::max(null_run_length, get_max_null_run(iface.events));
+            null_run_length =
+                std::max(null_run_length, get_max_null_run(iface.requests));
+        }
+
+        array = [&interfaces]() {
+            auto generate_entries =
+                [](const std::vector<Message> &msgs,
+                   const std::string iface_name) -> std::vector<Entry> {
+                std::vector<Entry> o;
+
+                for (auto &msg : msgs) {
+
+                    if (msg.only_primitives) {
+                        continue;
+                    }
+                    for (auto &arg : msg.rtti_args) {
+
+                        std::string type = "nullptr";
+                        if (arg.rtti_type) {
+                            type = std::format(
+                                "&rtti<traits>::{}_interface",
+                                arg.rtti_type.value());
+                        }
+
+                        Entry entry{};
+                        entry.type = std::move(type);
+
+                        entry.interface_name = iface_name;
+                        entry.message_name = msg.name;
+                        entry.arg_name = arg.name;
+
+                        o.push_back(std::move(entry));
+                    }
+                }
+
+                return o;
+            };
+
+            std::vector<Entry> o;
+            for (auto &iface : interfaces) {
+                auto request_entries =
+                    generate_entries(iface.requests, iface.name);
+                auto event_entries = generate_entries(iface.events, iface.name);
+
+                for (auto &req : request_entries) {
+                    o.push_back(std::move(req));
+                }
+
+                for (auto &ev : event_entries) {
+                    o.push_back(std::move(ev));
+                }
+            }
+
+            for (size_t e_i = 0; e_i != o.size(); ++e_i) {
+                Entry &e = o[e_i];
+                if (e.index) {
+                    throw std::runtime_error{
+                        "Type array should not have indexes here"};
+                }
+                e.index = e_i;
+            }
+
+            return o;
+        }();
+    }
+
+    size_t find_index(
+        const std::string interface_name, const std::string &message_name) const
+    {
+        namespace V = std::ranges::views;
+        auto interface_filtered = V::filter([&interface_name](const Entry &e) {
+            return e.interface_name == interface_name;
+        });
+
+        auto message_filtered = V::filter([&message_name](const Entry &e) {
+            return e.message_name == message_name;
+        });
+
+        auto entry_range =
+            array | interface_filtered | message_filtered | V::take(1);
+
+        std::optional<Entry> first_entry_op;
+        for (auto &entry : entry_range) {
+            first_entry_op = entry;
+            break;
+        }
+
+        if (!first_entry_op) {
+            std::string message = std::format(
+                "Cannot find index for [{}.{}] message",
+                interface_name,
+                message_name);
+            throw std::runtime_error{std::move(message)};
+        }
+        auto &first_entry = first_entry_op.value();
+
+        if (!first_entry.index) {
+            std::string message = std::format(
+                "Message [{}.{}] does not have an index",
+                interface_name,
+                message_name);
+            throw std::runtime_error{std::move(message)};
+        }
+
+        return first_entry.index.value();
+    }
+
+    size_t null_run_length;
+    std::vector<Entry> array;
+};
+
 struct Protocol
 {
     Protocol(const std::vector<InterfaceData> &i_interfaces)
@@ -1211,25 +1350,18 @@ struct Protocol
             interfaces.emplace_back(iface);
         }
 
-        for (auto &iface : interfaces) {
-            for (auto &ev : iface.events) {
-                if (ev.only_primitives) {
-                    null_run_length =
-                        std::max(null_run_length, ev.rtti_args.size());
-                }
-            }
+        _type_array_info = TypeArrayInfo{interfaces};
+    }
 
-            for (auto &req : iface.requests) {
-                if (req.only_primitives) {
-                    null_run_length =
-                        std::max(null_run_length, req.rtti_args.size());
-                }
-            }
-        }
+    const TypeArrayInfo &type_array_info() const
+    {
+        return _type_array_info.value();
     }
 
     std::vector<Interface> interfaces;
-    size_t null_run_length;
+
+  private:
+    std::optional<TypeArrayInfo> _type_array_info;
 };
 } // namespace rtti
 
@@ -1292,79 +1424,65 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
     sig += "const typename traits::wl_interface_t *";
     sig += "rtti<traits>::types[]";
 
-    size_t types_array_offset = 0;
-
     o += "template <typename traits>";
     o += std::format("{} {{", sig);
-    o += [&proto, &types_array_offset]() {
+
+    StringList types_array_entries;
+
+    types_array_entries += [&proto]() {
+        size_t null_run_length = proto.type_array_info().null_run_length;
+
+        size_t types_array_offset = 0;
         StringList types_list;
-        for (size_t nul_i = 0; nul_i != proto.null_run_length; ++nul_i) {
+        for (size_t nul_i = 0; nul_i != null_run_length; ++nul_i) {
             types_list += std::format(
-                "/* [{}][primitives_stub] */ nullptr,", types_array_offset);
+                "/* [{}][null_run_stub] */ nullptr", types_array_offset);
             types_array_offset++;
         }
         types_list.leftPad("    ");
         return types_list;
     }();
 
-    o += [&proto, &types_array_offset]() {
+    types_array_entries += [&proto]() {
         StringList o_l;
 
-        for (auto &iface : proto.interfaces) {
-            for (auto &req : iface.requests) {
-                if (req.only_primitives) {
-                    continue;
-                }
-                for (auto &arg : req.rtti_args) {
-                    std::string info_comment = std::format(
-                        "/* [{}][{}.{}.{}] */",
-                        types_array_offset,
-                        iface.name,
-                        req.name,
-                        arg.name);
+        auto &type_array = proto.type_array_info().array;
+        size_t null_run_offset = proto.type_array_info().null_run_length;
 
-                    std::string type = "nullptr";
-                    if (arg.rtti_type) {
-                        type = std::format(
-                            "&rtti<traits>::{}_interface",
-                            arg.rtti_type.value());
-                    }
-                    o_l += std::format("{} {},", info_comment, type);
-                    types_array_offset++;
-                }
-            }
+        for (auto &type_entry : type_array) {
 
-            for (auto ev : iface.events) {
-                if (ev.only_primitives) {
-                    continue;
-                }
-                for (auto &arg : ev.rtti_args) {
-                    std::string info_comment = std::format(
-                        "/* [{}][{}.{}.{}] */",
-                        types_array_offset,
-                        iface.name,
-                        ev.name,
-                        arg.name);
-                    std::string type = "nullptr";
-                    if (arg.rtti_type) {
-                        type = std::format(
-                            "&rtti<traits>::{}_interface",
-                            arg.rtti_type.value());
-                    }
-                    o_l += std::format("{} {},", info_comment, type);
-                    types_array_offset++;
-                }
-            }
+            std::string info_comment = std::format(
+                "/* [{}][{}.{}.{}] */",
+                type_entry.index.value() + null_run_offset,
+                type_entry.interface_name,
+                type_entry.message_name,
+                type_entry.arg_name);
+
+            o_l += std::format("{} {}", info_comment, type_entry.type);
         }
+
         o_l.leftPad("    ");
         return o_l;
     }();
+
+    auto types_array_entries_reversed =
+        std::views::reverse(types_array_entries.get());
+    bool first = true;
+    for (auto &e : types_array_entries_reversed) {
+        if (!first) {
+            e = std::format("{},", e);
+        }
+        first = false;
+    }
+
+    o += std::move(types_array_entries);
 
     o += "};";
     return o;
 }
 
-StringList emit_rtti_interface_struct_members(const rtti::Interface &interface)
+StringList emit_rtti_interface_struct_members(
+    const rtti::Interface &interface, const rtti::TypeArrayInfo &types)
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -1378,19 +1496,25 @@ StringList emit_rtti_interface_struct_members(const rtti::Interface &interface)
     };
 
     auto emit_rtti_message_elements =
-        [](const std::vector<rtti::Message> &msgs) -> StringList {
+        [&types,
+         &interface](const std::vector<rtti::Message> &msgs) -> StringList {
         StringList ro;
         if (msgs.empty()) {
             return ro;
         }
 
         for (auto &msg : msgs) {
-            std::string rtti_ref_offset = "/* TODO: FIX BAD OFFSET = */ 0";
-            if (msg.only_primitives) {
-                rtti_ref_offset = "/* primitives_stub */ 0";
+            std::string rtti_ref_offset_str = "/* [null_run_stub] */ 0";
+            if (!msg.only_primitives) {
+                size_t offset = types.find_index(interface.name, msg.name);
+                offset += types.null_run_length;
+                std::string info_comment =
+                    std::format("[{}.{}]", interface.name, msg.name);
+                rtti_ref_offset_str =
+                    std::format("/* {} */ {}", info_comment, offset);
             }
             std::string rtti_ref_str =
-                std::format("rtti<traits>::types + {}", rtti_ref_offset);
+                std::format("rtti<traits>::types + {}", rtti_ref_offset_str);
             ro += std::format(
                 "{{\"{}\", \"{}\", {}}}",
                 msg.name,
@@ -1409,6 +1533,37 @@ StringList emit_rtti_interface_struct_members(const rtti::Interface &interface)
 
         return ro;
     };
+
+    add_sep();
+    o += "template <typename traits>";
+    o += std::format(
+        "const typename traits::wl_interface_t rtti<traits>::{}_interface {{",
+        interface.name);
+    o += [&interface]() {
+        StringList o_memb;
+        o_memb += std::format("\"{}\", {},", interface.name, interface.version);
+        if (!interface.requests.empty()) {
+            o_memb += std::format(
+                "{}, rtti<traits>::{}_requests,",
+                interface.requests.size(),
+                interface.name);
+        } else {
+            o_memb += "0, nullptr,";
+        }
+
+        if (!interface.events.empty()) {
+            o_memb += std::format(
+                "{}, rtti<traits>::{}_events",
+                interface.events.size(),
+                interface.name);
+        } else {
+            o_memb += "0, nullptr";
+        }
+
+        o_memb.leftPad("    ");
+        return o_memb;
+    }();
+    o += "};";
 
     if (!interface.requests.empty()) {
         add_sep();
@@ -1439,36 +1594,6 @@ StringList emit_rtti_interface_struct_members(const rtti::Interface &interface)
         o += "};";
     }
 
-    add_sep();
-    o += "template <typename traits>";
-    o += std::format(
-        "const typename traits::wl_interface_t rtti<traits>::{}_interface {{",
-        interface.name);
-    o += [&interface]() {
-        StringList o_memb;
-        o_memb += std::format("\"{}\", {},", interface.name, interface.version);
-        if (!interface.requests.empty()) {
-            o_memb += std::format(
-                "{}, rtti<traits>::{}_requests,",
-                interface.requests.size(),
-                interface.name);
-        } else {
-            o_memb += "0, nullptr,";
-        }
-
-        if (!interface.events.empty()) {
-            o_memb += std::format(
-                "{}, rtti<traits>::{}_events,",
-                interface.events.size(),
-                interface.name);
-        } else {
-            o_memb += "0, nullptr";
-        }
-
-        o_memb.leftPad("    ");
-        return o_memb;
-    }();
-    o += "};";
     return o;
 }
 
@@ -1482,7 +1607,8 @@ StringList emit_rtti(const rtti::Protocol &proto)
     o += "";
     bool first = true;
     for (auto &iface : proto.interfaces) {
-        auto iface_members = emit_rtti_interface_struct_members(iface);
+        auto iface_members =
+            emit_rtti_interface_struct_members(iface, proto.type_array_info());
         if (!first) {
             o += "";
         }
