@@ -571,23 +571,58 @@ StringList
     StringList args_strings;
     args_strings += std::format("// {}", __func__);
 
-    std::vector<std::expected<std::string, std::string>> signature_args;
+    struct ArgEmitInfo
+    {
+        ArgEmitInfo() : _v{"No diagnostic"}
+        {
+        }
 
-    std::string first_arg =
-        std::format("{} *{}", D.interface_name, D.first_arg_name);
-    signature_args.emplace_back(std::move(first_arg));
+        ArgEmitInfo(std::string val) : _v{std::move(val)}
+        {
+        }
+
+        void set_diagnostic(std::string diagnostic)
+        {
+            _v.reset();
+            _diagnostic = std::move(diagnostic);
+        }
+
+        bool has_value() const
+        {
+            return _v.has_value();
+        }
+
+        std::string &value()
+        {
+            return _v.value();
+        }
+
+        std::string &diagnostic()
+        {
+            return _diagnostic.value();
+        }
+
+      private:
+        std::optional<std::string> _v{};
+        std::optional<std::string> _diagnostic{};
+    };
+
+    std::vector<ArgEmitInfo> signature_args;
+
+    signature_args.emplace_back(
+        std::format("{} *{}", D.interface_name, D.first_arg_name));
 
     for (auto &arg : D.request.args) {
         const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
         if (arg_new_id_p != nullptr) {
             auto arg_interface_name = arg_new_id_p->interface_name;
             if (!arg_interface_name) {
-                signature_args.emplace_back(
-                    std::format(
-                        "const {} *{}",
-                        D.interface_traits
-                            .wayland_client_core_wl_interface_typename,
-                        D.new_id_inteface_name));
+                std::string arg_str = std::format(
+                    "const {} *{}",
+                    D.interface_traits
+                        .wayland_client_core_wl_interface_typename,
+                    D.new_id_inteface_name);
+                signature_args.emplace_back(arg_str);
                 signature_args.emplace_back("uint32_t version");
                 continue;
             }
@@ -596,7 +631,10 @@ StringList
                 "(name=[{}] type=[new_id] interface=[{}])",
                 arg.name,
                 arg_interface_name.value());
-            signature_args.emplace_back(std::unexpected{diagnostic});
+
+            ArgEmitInfo diag_arg;
+            diag_arg.set_diagnostic(diagnostic);
+            signature_args.emplace_back(std::move(diag_arg));
 
             continue;
         }
@@ -621,8 +659,8 @@ StringList
     }
 
     for (auto arg : signature_args) {
-        if (!arg) {
-            args_strings += std::format("// [[nogen]]: {}", arg.error());
+        if (!arg.has_value()) {
+            args_strings += std::format("// [[nogen]]: {}", arg.diagnostic());
             continue;
         }
         args_strings += std::move(arg.value());
