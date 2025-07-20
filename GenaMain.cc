@@ -900,6 +900,9 @@ StringList emit_interface_requests(const EmitInterfaceRequestsData &D)
     for (auto &request : D.iface.requests) {
         auto req_i = next_req_index;
         next_req_index++;
+        if (req_i != 0) {
+            o += "";
+        }
         std::string request_index_name =
             std::format("request_index_{}", request.name);
         o += std::format(
@@ -908,9 +911,6 @@ StringList emit_interface_requests(const EmitInterfaceRequestsData &D)
         iface_emit_data.interface_name = D.iface.name;
         iface_emit_data.request_index_name = request_index_name;
         o += emit_interface_request(iface_emit_data);
-        if (next_req_index != 0) {
-            o += "";
-        }
     }
 
     return o;
@@ -1000,7 +1000,7 @@ StringList emit_interface(const InterfaceData &iface)
         o += std::move(requests);
     }
 
-    o += "";
+    add_sep();
     o += "private:";
     o += std::format(
         "    typename {} &_core;",
