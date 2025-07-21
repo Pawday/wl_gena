@@ -1620,19 +1620,20 @@ StringList emit_rtti(const rtti::Protocol &proto)
     return o;
 }
 
-void process_header_mode(const HeaderModeArgs &args)
+struct GenerateHeaderInput
 {
-    std::string protocol_xml = read_text_file(args.proto_file_name);
-    std::ofstream output_file{args.output_file_name};
-    output_file.exceptions(std::ifstream::failbit);
-    output_file.exceptions(std::ifstream::badbit);
-    auto protocol_op = Wayland::parse_protocol(protocol_xml);
-    if (!protocol_op) {
-        std::cerr << protocol_op.error();
-        return;
-    }
-    auto protocol = protocol_op.value();
-    auto interfaces = protocol.interfaces;
+    Wayland::ScannerTypes::Protocol protocol;
+    std::optional<std::string> top_namespace_id;
+};
+
+struct GenerateHeaderOutput
+{
+    std::string output;
+};
+
+GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
+{
+    auto interfaces = I.protocol.interfaces;
     auto sorted_interfaces = topo_sort_interfaces(interfaces);
 
     StringList o;
@@ -1648,7 +1649,7 @@ void process_header_mode(const HeaderModeArgs &args)
     o += emit_object_forward(interfaces);
 
     o += "";
-    o += std::format("namespace {} {{", protocol.name);
+    o += std::format("namespace {} {{", I.protocol.name);
 
     o += "";
     auto rtti_struct = emit_rtti_struct(interfaces);
@@ -1667,7 +1668,7 @@ void process_header_mode(const HeaderModeArgs &args)
     o += "";
     o += emit_rtti(interfaces);
 
-    o += std::format("}} // namespace {}", protocol.name);
+    o += std::format("}} // namespace {}", I.protocol.name);
 
     auto make_empty_if_blank = [](std::string &str) {
         for (auto c : str) {
@@ -1685,7 +1686,30 @@ void process_header_mode(const HeaderModeArgs &args)
         output += '\n';
     }
 
-    output_file << output;
+    return GenerateHeaderOutput{std::move(output)};
+}
+
+void process_header_mode(const HeaderModeArgs &args)
+{
+    std::string protocol_xml = read_text_file(args.proto_file_name);
+    std::ofstream output_file{args.output_file_name};
+
+    output_file.exceptions(std::ifstream::failbit);
+    output_file.exceptions(std::ifstream::badbit);
+
+    auto protocol_op = Wayland::parse_protocol(protocol_xml);
+    if (!protocol_op) {
+        std::cerr << protocol_op.error();
+        return;
+    }
+    auto protocol = protocol_op.value();
+
+    GenerateHeaderInput I;
+    I.protocol = std::move(protocol);
+
+    auto O = generate_header(I);
+
+    output_file << O.output;
 }
 
 } // namespace
