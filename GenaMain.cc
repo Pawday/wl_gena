@@ -1070,6 +1070,7 @@ StringList emit_object_forward(
         o += std::format("// deps for {}", iface.name);
         for (auto &dep : deps) {
             o += std::format("struct {};", dep);
+            emited.insert(dep);
         }
     }
 
