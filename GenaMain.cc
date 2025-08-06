@@ -266,6 +266,7 @@ struct TypeToStringVisitor
 };
 
 StringList emit_interface_listener_type_event(
+    const std::string &iface_typename,
     const Wayland::ScannerTypes::Event &ev,
     const InterfaceTraits &interface_traits)
 {
@@ -275,6 +276,7 @@ StringList emit_interface_listener_type_event(
     StringList args;
 
     args += "void *data";
+    args += std::format("{} *object", iface_typename);
     for (auto &arg : ev.args) {
         std::string type_string =
             std::visit(TypeToStringVisitor{interface_traits}, arg.type);
@@ -303,6 +305,7 @@ StringList emit_interface_listener_type_event(
 }
 
 StringList emit_interface_event_listener_type(
+    const std::string &iface_typename,
     const std::vector<Wayland::ScannerTypes::Event> &events,
     const InterfaceTraits &interface_traits)
 {
@@ -320,8 +323,8 @@ StringList emit_interface_event_listener_type(
             o += "";
         }
         first = false;
-        auto typedef_str =
-            emit_interface_listener_type_event(event, interface_traits);
+        auto typedef_str = emit_interface_listener_type_event(
+            iface_typename, event, interface_traits);
         typedef_str.leftPad("    ");
         o += std::move(typedef_str);
     }
@@ -971,8 +974,9 @@ StringList emit_interface(const InterfaceData &iface)
     if (has_events) {
         add_sep();
 
-        StringList type =
-            emit_interface_event_listener_type(iface.events, traits);
+        const std::string &interface_typename = iface.name;
+        StringList type = emit_interface_event_listener_type(
+            interface_typename, iface.events, traits);
         type.leftPad("    ");
         o += std::move(type);
     }
