@@ -115,25 +115,74 @@ struct HeaderModeArgs
 {
     std::string proto_file_name;
     std::string output_file_name;
+    std::vector<std::string> includes;
 };
 
 std::expected<HeaderModeArgs, std::string>
-    parse_header_mode(std::vector<std::string> args)
+    parse_header_mode_args(std::vector<std::string> args)
 {
+    HeaderModeArgs out{};
+
     auto flag_it = std::ranges::find(args, "--header");
     if (flag_it == std::end(args)) {
         return std::unexpected("No --header flag");
     }
     args.erase(flag_it);
 
+    std::string syntax_message;
+    syntax_message += "<protocol_file> <output_file> [--includes "
+                      "file[,file_2,/system_file,/system_file_2,...]]";
+
+    auto help_it = std::ranges::find(args, "--help");
+    if (help_it != std::end(args)) {
+        return std::unexpected(std::move(syntax_message));
+    }
+
+    auto includes_it = std::ranges::find(args, "--includes");
+    if (includes_it != std::end(args)) {
+        auto includes_val_it = includes_it + 1;
+        if (includes_val_it == std::end(args)) {
+
+            std::string message = "No value for --includes option was found. ";
+            message += std::format(
+                "Expected arguments with following syntax ({})",
+                syntax_message);
+            return std::unexpected(std::move(message));
+        }
+
+        std::string includes_val = *includes_val_it;
+        args.erase(includes_it, includes_val_it + 1);
+
+        std::vector<std::string> includes;
+        includes.push_back({});
+
+        for (char c : includes_val) {
+            if (c == ',') {
+                includes.push_back({});
+                continue;
+            }
+            includes.back() += c;
+        }
+
+        auto empty_lines = std::ranges::remove_if(
+            includes, [](const std::string &str) { return str.empty(); });
+        includes.erase(empty_lines.begin(), empty_lines.end());
+
+        for (std::string &include_line : includes) {
+            if (include_line[0] == '/') {
+                include_line[0] = '<';
+                include_line += '>';
+                continue;
+            }
+            include_line = std::format("\"{}\"", include_line);
+        }
+        out.includes = std::move(includes);
+    }
+
     if (args.size() != 2) {
         std::string message;
-        message += "Expected";
-        if (args.size() > 2) {
-            message += " only";
-        }
-        message += " <protocol_file> and <output_file> arguments";
-        message += " with --header flag";
+        message += std::format(
+            "Expected arguments with following syntax ({})", syntax_message);
 
         std::vector<std::string> dec_args;
         std::ranges::copy(args, std::back_inserter(dec_args));
@@ -146,8 +195,6 @@ std::expected<HeaderModeArgs, std::string>
 
         return std::unexpected(std::move(message));
     }
-
-    HeaderModeArgs out{};
 
     out.proto_file_name = args.at(0);
     out.output_file_name = args.at(1);
@@ -1628,6 +1675,7 @@ struct GenerateHeaderInput
 {
     Wayland::ScannerTypes::Protocol protocol;
     std::optional<std::string> top_namespace_id;
+    std::vector<std::string> includes;
 };
 
 struct GenerateHeaderOutput
@@ -1643,8 +1691,10 @@ GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
     StringList o;
     o += "#pragma once";
     o += "";
-    o += "#include <cstdint>";
-    o += "#include <cstddef>";
+    for (const std::string &include_file : I.includes) {
+        o += std::format("#include {}", include_file);
+    }
+
     o += "";
 
     o += "struct wl_proxy;";
@@ -1710,6 +1760,7 @@ void process_header_mode(const HeaderModeArgs &args)
 
     GenerateHeaderInput I;
     I.protocol = std::move(protocol);
+    I.includes = args.includes;
 
     auto O = generate_header(I);
 
@@ -1731,7 +1782,7 @@ int wl_gena_main(const std::vector<std::string> argv)
         std::format("JSON Mode: [{}]", json_mode_args_op.error());
     failue_msgs.emplace_back(std::move(json_mode_message));
 
-    auto header_mode_args_op = parse_header_mode(argv);
+    auto header_mode_args_op = parse_header_mode_args(argv);
     if (header_mode_args_op) {
         process_header_mode(header_mode_args_op.value());
         return EXIT_SUCCESS;
