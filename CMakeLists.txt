@@ -45,8 +45,9 @@ target_cxx23(${PREF}wl_gena.PIC_object)
 target_strict_compilation(${PREF}wl_gena.PIC_object)
 
 list(APPEND SOURCES
-    GenaMain.cc
+    NewGenaMain.cc
     Parser.cc
+    HeaderGena.cc
 )
 
 target_sources(${PREF}wl_gena.object PRIVATE ${SOURCES})
