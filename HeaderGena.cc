@@ -184,7 +184,7 @@ StringList emit_interface_event_listener_type(
 
     StringList o;
     o += std::format("// {}", __func__);
-    o += "struct listener";
+    o += "struct listener_t";
     o += "{";
     bool first = true;
     for (auto &event : events) {
@@ -209,7 +209,8 @@ StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
 
     o += std::format("// {}", __func__);
     o += std::format(
-        "int add_listener({0} *{0}, const listener *listener, void *data)", n);
+        "int add_listener({0} *{0}, const listener_t *listener, void *data)",
+        n);
     o += "{";
     {
         StringList b;
