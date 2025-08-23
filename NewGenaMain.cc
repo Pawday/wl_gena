@@ -95,7 +95,7 @@ std::string read_text_file(const std::string &name)
 void process_json_mode(const JsonModeArgs &args)
 {
     std::string protocol_xml = read_text_file(args.proto_file_name);
-    auto protocol_op = Wayland::parse_protocol(protocol_xml);
+    auto protocol_op = wl_gena::parse_protocol(protocol_xml);
     if (!protocol_op) {
         std::cerr << protocol_op.error();
         return;
@@ -204,7 +204,7 @@ void process_header_mode(const HeaderModeArgs &args)
     output_file.exceptions(std::ifstream::failbit);
     output_file.exceptions(std::ifstream::badbit);
 
-    auto protocol_op = Wayland::parse_protocol(protocol_xml);
+    auto protocol_op = wl_gena::parse_protocol(protocol_xml);
     if (!protocol_op) {
         std::cerr << protocol_op.error();
         return;

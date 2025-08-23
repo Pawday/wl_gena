@@ -6,9 +6,9 @@
 
 #include "Types.hh"
 
-namespace Wayland {
+namespace wl_gena {
 
-std::expected<ScannerTypes::Protocol, std::string>
-    parse_protocol(std::string_view protocol_xml);
+auto parse_protocol(std::string_view protocol_xml)
+    -> std::expected<types::Protocol, std::string>;
 
 }

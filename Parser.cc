@@ -21,7 +21,7 @@
 #include "Parser.hh"
 #include "Types.hh"
 
-namespace Wayland {
+namespace wl_gena {
 
 namespace {
 
@@ -122,14 +122,14 @@ struct ProtoParser
 {
     // clang-format off
     using ParseTarget = std::variant<
-        ScannerTypes::Arg,
-        ScannerTypes::Enum,
-        ScannerTypes::Enum::Entry,
-        ScannerTypes::Message,
-        ScannerTypes::Request,
-        ScannerTypes::Event,
-        ScannerTypes::Interface,
-        ScannerTypes::Protocol
+        types::Arg,
+        types::Enum,
+        types::Enum::Entry,
+        types::Message,
+        types::Request,
+        types::Event,
+        types::Interface,
+        types::Protocol
     >;
     // clang-format on
 
@@ -181,7 +181,7 @@ struct ProtoParser
 
     auto parse_protocol(const AttributeMap &attrs) -> void
     {
-        ScannerTypes::Protocol new_proto;
+        types::Protocol new_proto;
         std::string name = attrs.at("name");
         new_proto.name = name;
         targets.emplace(std::move(new_proto));
@@ -195,8 +195,7 @@ struct ProtoParser
         }
 
         ParseTarget &active_target = targets.top();
-        ScannerTypes::Protocol active_proto =
-            std::get<ScannerTypes::Protocol>(active_target);
+        types::Protocol active_proto = std::get<types::Protocol>(active_target);
         targets.pop();
 
         output_proto = std::move(active_proto);
@@ -204,14 +203,14 @@ struct ProtoParser
 
     auto parse_interface(const AttributeMap &attrs) -> void
     {
-        ScannerTypes::Interface new_interface{};
+        types::Interface new_interface{};
 
         std::string name = attrs.at("name");
         new_interface.name = std::move(name);
         std::string vesion_string = attrs.at("version");
 
-        auto version_op = parse_num<decltype(ScannerTypes::Interface::version)>(
-            vesion_string);
+        auto version_op =
+            parse_num<decltype(types::Interface::version)>(vesion_string);
 
         std::optional<std::string> error_string{};
         if (!version_op.has_value()) {
@@ -237,26 +236,26 @@ struct ProtoParser
     auto fin_interface() -> void
     {
         ParseTarget &active_interface_target = targets.top();
-        ScannerTypes::Interface active_interface =
-            std::get<ScannerTypes::Interface>(active_interface_target);
+        types::Interface active_interface =
+            std::get<types::Interface>(active_interface_target);
         targets.pop();
 
         auto &active_proto_target = targets.top();
-        ScannerTypes::Protocol &active_protocol =
-            std::get<ScannerTypes::Protocol>(active_proto_target);
+        types::Protocol &active_protocol =
+            std::get<types::Protocol>(active_proto_target);
 
         active_protocol.interfaces.emplace_back(std::move(active_interface));
     }
 
     auto parse_request(const AttributeMap &attrs) -> void
     {
-        ScannerTypes::Request new_request;
+        types::Request new_request;
         std::string request_name = attrs.at("name");
 
         if (attrs.contains("type")) {
             std::string type_string = attrs.at("type");
             if (type_string == "destructor") {
-                new_request.type = ScannerTypes::Request::TypeDestructor{};
+                new_request.type = types::Request::TypeDestructor{};
             } else {
                 std::string message =
                     std::format("Unknown request type [{}]", type_string);
@@ -283,7 +282,7 @@ struct ProtoParser
 
     struct FinRequestVisitor
     {
-        explicit FinRequestVisitor(ScannerTypes::Request &req) : _req(req)
+        explicit FinRequestVisitor(types::Request &req) : _req(req)
         {
         }
 
@@ -295,20 +294,20 @@ struct ProtoParser
             throw std::runtime_error(std::move(message));
         }
 
-        void operator()(ScannerTypes::Interface &interface)
+        void operator()(types::Interface &interface)
         {
             interface.requests.emplace_back(std::move(_req));
         }
 
       private:
-        ScannerTypes::Request &_req;
+        types::Request &_req;
     };
 
     auto fin_request() -> void
     {
         ParseTarget &active_target = targets.top();
-        ScannerTypes::Request request =
-            std::move(std::get<ScannerTypes::Request>(active_target));
+        types::Request request =
+            std::move(std::get<types::Request>(active_target));
         targets.pop();
 
         ParseTarget &request_parent_target = targets.top();
@@ -317,7 +316,7 @@ struct ProtoParser
 
     auto parse_event(const AttributeMap &attrs) -> void
     {
-        ScannerTypes::Event new_event;
+        types::Event new_event;
         std::string event_name = attrs.at("name");
 
         std::optional<uint32_t> since;
@@ -339,7 +338,7 @@ struct ProtoParser
 
     struct FinEventVisitor
     {
-        explicit FinEventVisitor(ScannerTypes::Event &ev) : _ev(ev)
+        explicit FinEventVisitor(types::Event &ev) : _ev(ev)
         {
         }
 
@@ -351,20 +350,19 @@ struct ProtoParser
             throw std::runtime_error(std::move(message));
         }
 
-        void operator()(ScannerTypes::Interface &interface)
+        void operator()(types::Interface &interface)
         {
             interface.events.emplace_back(std::move(_ev));
         }
 
       private:
-        ScannerTypes::Event &_ev;
+        types::Event &_ev;
     };
 
     auto fin_event() -> void
     {
         ParseTarget &active_target = targets.top();
-        ScannerTypes::Event event =
-            std::move(std::get<ScannerTypes::Event>(active_target));
+        types::Event event = std::move(std::get<types::Event>(active_target));
         targets.pop();
 
         ParseTarget &request_parent_target = targets.top();
@@ -372,9 +370,8 @@ struct ProtoParser
     }
 
     auto parse_arg_type(
-        [[maybe_unused]] const std::string &arg_type_string,
-        [[maybe_unused]] const AttributeMap &attrs)
-        -> std::expected<ScannerTypes::ArgType, std::string>
+        const std::string &arg_type_string, const AttributeMap &attrs)
+        -> std::expected<types::ArgType, std::string>
     {
 
         const auto interface_name = [&attrs]() -> std::optional<std::string> {
@@ -397,13 +394,13 @@ struct ProtoParser
          */
 
         if (arg_type_string == "int") {
-            return ScannerTypes::ArgTypes::Int{};
+            return types::ArgTypes::Int{};
         }
 
         if (arg_type_string == "uint") {
 
             if (!attrs.contains("enum")) {
-                return ScannerTypes::ArgTypes::UInt{};
+                return types::ArgTypes::UInt{};
             }
 
             /*
@@ -417,7 +414,7 @@ struct ProtoParser
                 enum_location.find(".") != enum_location.npos;
 
             if (!has_interface_name) {
-                ScannerTypes::ArgTypes::UIntEnum out{};
+                types::ArgTypes::UIntEnum out{};
                 out.name = std::move(enum_location);
                 return out;
             }
@@ -459,35 +456,35 @@ struct ProtoParser
             }
             auto &sep = sep_op.value();
 
-            ScannerTypes::ArgTypes::UIntEnum out{};
+            types::ArgTypes::UIntEnum out{};
             out.interface_name = std::move(sep.first);
             out.name = std::move(sep.second);
             return out;
         }
 
         if (arg_type_string == "fixed") {
-            return ScannerTypes::ArgTypes::Fixed{};
+            return types::ArgTypes::Fixed{};
         }
 
         if (arg_type_string == "string" || arg_type_string == "object") {
 
-            ScannerTypes::ArgType out_t;
-            ScannerTypes::ArgType null_out_t;
+            types::ArgType out_t;
+            types::ArgType null_out_t;
 
             if (arg_type_string == "string") {
-                out_t = ScannerTypes::ArgTypes::String{};
-                null_out_t = ScannerTypes::ArgTypes::NullString{};
+                out_t = types::ArgTypes::String{};
+                null_out_t = types::ArgTypes::NullString{};
             } else if (arg_type_string == "object") {
-                ScannerTypes::ArgTypes::Object obj{};
+                types::ArgTypes::Object obj{};
                 obj.interface_name = interface_name;
                 out_t = std::move(obj);
-                ScannerTypes::ArgTypes::NullObject null_obj{};
+                types::ArgTypes::NullObject null_obj{};
                 null_obj.interface_name = interface_name;
                 null_out_t = std::move(null_obj);
             } else {
                 std::string message = std::format(
                     "Unexpected arg_type_string value change from"
-                    " \"string\" or \"\" to [{}]",
+                    " \"string\" or \"object\" to [{}]",
                     arg_type_string);
                 return std::unexpected(std::move(message));
             }
@@ -509,17 +506,17 @@ struct ProtoParser
         }
 
         if (arg_type_string == "new_id") {
-            ScannerTypes::ArgTypes::NewID new_id{};
+            types::ArgTypes::NewID new_id{};
             new_id.interface_name = interface_name;
             return new_id;
         }
 
         if (arg_type_string == "array") {
-            return ScannerTypes::ArgTypes::Array{};
+            return types::ArgTypes::Array{};
         }
 
         if (arg_type_string == "fd") {
-            return ScannerTypes::ArgTypes::FD{};
+            return types::ArgTypes::FD{};
         }
 
         return std::unexpected(
@@ -528,7 +525,7 @@ struct ProtoParser
 
     auto parse_arg(const AttributeMap &attrs)
     {
-        ScannerTypes::Arg arg;
+        types::Arg arg;
         std::string name = attrs.at("name");
         arg.name = std::move(name);
 
@@ -548,7 +545,7 @@ struct ProtoParser
 
     struct FinArgVisitor
     {
-        explicit FinArgVisitor(ScannerTypes::Arg &arg) : _arg{arg}
+        explicit FinArgVisitor(types::Arg &arg) : _arg{arg}
         {
         }
 
@@ -560,25 +557,24 @@ struct ProtoParser
             throw std::runtime_error(std::move(message));
         }
 
-        void operator()(ScannerTypes::Request &req)
+        void operator()(types::Request &req)
         {
             req.args.emplace_back(std::move(_arg));
         }
 
-        void operator()(ScannerTypes::Event &event)
+        void operator()(types::Event &event)
         {
             event.args.emplace_back(std::move(_arg));
         }
 
       private:
-        ScannerTypes::Arg &_arg;
+        types::Arg &_arg;
     };
 
     auto fin_arg()
     {
         ParseTarget &active_target = targets.top();
-        ScannerTypes::Arg arg_target =
-            std::move(std::get<ScannerTypes::Arg>(active_target));
+        types::Arg arg_target = std::move(std::get<types::Arg>(active_target));
         targets.pop();
 
         ParseTarget &request_parent_target = targets.top();
@@ -587,7 +583,7 @@ struct ProtoParser
 
     auto parse_enum(const AttributeMap &attrs)
     {
-        ScannerTypes::Enum new_enum{};
+        types::Enum new_enum{};
         if (!attrs.contains("name")) {
 
             std::string message = "Found unnamed enum tag";
@@ -604,20 +600,20 @@ struct ProtoParser
     void fin_enum()
     {
         ParseTarget &active_target = targets.top();
-        ScannerTypes::Enum enum_target =
-            std::move(std::get<ScannerTypes::Enum>(active_target));
+        types::Enum enum_target =
+            std::move(std::get<types::Enum>(active_target));
         targets.pop();
 
         ParseTarget &interface_parent_target = targets.top();
-        ScannerTypes::Interface &interface =
-            std::get<ScannerTypes::Interface>(interface_parent_target);
+        types::Interface &interface =
+            std::get<types::Interface>(interface_parent_target);
 
         interface.enums.emplace_back(std::move(enum_target));
     }
 
     auto parse_entry(const AttributeMap &attrs)
     {
-        ScannerTypes::Enum::Entry entry{};
+        types::Enum::Entry entry{};
 
         std::string name = attrs.at("name");
         std::string value_string = attrs.at("value");
@@ -633,8 +629,8 @@ struct ProtoParser
             value_string = value_string.substr(2);
         }
 
-        auto value_op = parse_num<decltype(ScannerTypes::Enum::Entry::value)>(
-            value_string, base);
+        auto value_op =
+            parse_num<decltype(types::Enum::Entry::value)>(value_string, base);
 
         std::optional<std::string> error_string{};
         if (!value_op.has_value()) {
@@ -662,12 +658,12 @@ struct ProtoParser
     auto fin_entry()
     {
         ParseTarget &active_target = targets.top();
-        ScannerTypes::Enum::Entry entry =
-            std::move(std::get<ScannerTypes::Enum::Entry>(active_target));
+        types::Enum::Entry entry =
+            std::move(std::get<types::Enum::Entry>(active_target));
         targets.pop();
 
         ParseTarget &enum_target = targets.top();
-        ScannerTypes::Enum &wl_enum = std::get<ScannerTypes::Enum>(enum_target);
+        types::Enum &wl_enum = std::get<types::Enum>(enum_target);
 
         wl_enum.entries.emplace_back(std::move(entry));
     }
@@ -818,7 +814,7 @@ struct ProtoParser
         std::visit(vis, parsed_tag.value());
     }
 
-    auto get() const -> const ScannerTypes::Protocol &
+    auto get() const -> const types::Protocol &
     {
         return output_proto.value();
     };
@@ -836,14 +832,14 @@ struct ProtoParser
             tgt.name);                                                         \
     }
 
-        ADD_OVERLOAD(ScannerTypes::Arg, arg)
-        ADD_OVERLOAD(ScannerTypes::Enum, enum)
-        ADD_OVERLOAD(ScannerTypes::Enum::Entry, entry)
-        ADD_OVERLOAD(ScannerTypes::Message, event | request)
-        ADD_OVERLOAD(ScannerTypes::Request, request)
-        ADD_OVERLOAD(ScannerTypes::Event, event)
-        ADD_OVERLOAD(ScannerTypes::Interface, interface)
-        ADD_OVERLOAD(ScannerTypes::Protocol, protocol)
+        ADD_OVERLOAD(types::Arg, arg)
+        ADD_OVERLOAD(types::Enum, enum)
+        ADD_OVERLOAD(types::Enum::Entry, entry)
+        ADD_OVERLOAD(types::Message, event | request)
+        ADD_OVERLOAD(types::Request, request)
+        ADD_OVERLOAD(types::Event, event)
+        ADD_OVERLOAD(types::Interface, interface)
+        ADD_OVERLOAD(types::Protocol, protocol)
 #undef ADD_OVERLOAD
     };
 
@@ -854,12 +850,12 @@ struct ProtoParser
 
     std::stack<ParseTarget> targets;
 
-    std::optional<ScannerTypes::Protocol> output_proto;
+    std::optional<types::Protocol> output_proto;
 };
 
 } // namespace
 
-std::expected<ScannerTypes::Protocol, std::string>
+std::expected<types::Protocol, std::string>
     parse_protocol(std::string_view protocol_xml)
 {
     ProtoParser ctx;
@@ -872,4 +868,4 @@ std::expected<ScannerTypes::Protocol, std::string>
     return ctx.get();
 }
 
-} // namespace Wayland
+} // namespace wl_gena

@@ -49,7 +49,7 @@ struct std::formatter<FormatVectorWrap<T>> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::ArgType> : FormatterNoParseArgs
 {
     template <typename FmtContext>
     struct WaylandArgTypeNameVisitor
@@ -64,10 +64,10 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
         return _ctx.out();                                                     \
     }
 
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::Int, "int")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::UInt, "uint")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::Int, "int")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::UInt, "uint")
 
-        auto operator()(const Wayland::ScannerTypes::ArgTypes::UIntEnum &v)
+        auto operator()(const wl_gena::types::ArgTypes::UIntEnum &v)
             -> FmtContext::iterator
         {
             std::format_to(_ctx.out(), "{{");
@@ -85,18 +85,18 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
             return _ctx.out();
         }
 
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::Fixed, "fixed")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::String, "string")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::NullString, "?str")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::Fixed, "fixed")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::String, "string")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::NullString, "?str")
 
         auto format_with_interface(
             const std::string_view name,
             const std::optional<std::string> &interface_name)
-            -> FmtContext ::iterator
+            -> FmtContext::iterator
 
         {
             std::format_to(_ctx.out(), "{{");
-            std ::format_to(_ctx.out(), "\"name\":\"{}\"", name);
+            std::format_to(_ctx.out(), "\"name\":\"{}\"", name);
             if (interface_name.has_value()) {
                 std::format_to(_ctx.out(), ",");
                 std::format_to(
@@ -106,23 +106,23 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
             return _ctx.out();
         }
 
-        auto operator()(const Wayland::ScannerTypes::ArgTypes::Object &o)
-            -> FmtContext ::iterator
+        auto operator()(const wl_gena::types::ArgTypes::Object &o)
+            -> FmtContext::iterator
         {
             return format_with_interface("obj", o.interface_name);
         }
-        auto operator()(const Wayland::ScannerTypes::ArgTypes::NullObject &o)
-            -> FmtContext ::iterator
+        auto operator()(const wl_gena::types::ArgTypes::NullObject &o)
+            -> FmtContext::iterator
         {
             return format_with_interface("?obj", o.interface_name);
         }
-        auto operator()(const Wayland::ScannerTypes::ArgTypes::NewID &i)
-            -> FmtContext ::iterator
+        auto operator()(const wl_gena::types::ArgTypes::NewID &i)
+            -> FmtContext::iterator
         {
             return format_with_interface("id", i.interface_name);
         }
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::Array, "arr")
-        ADD_OVERLOAD(Wayland::ScannerTypes::ArgTypes::FD, "fd")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::Array, "arr")
+        ADD_OVERLOAD(wl_gena::types::ArgTypes::FD, "fd")
 #undef ADD_OVERLOAD
 
       private:
@@ -130,8 +130,8 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
     };
 
     template <class FmtContext>
-    FmtContext::iterator format(
-        const Wayland::ScannerTypes::ArgType &type, FmtContext &ctx) const
+    FmtContext::iterator
+        format(const wl_gena::types::ArgType &type, FmtContext &ctx) const
     {
         WaylandArgTypeNameVisitor vis{ctx};
         return std::visit(vis, type);
@@ -139,11 +139,11 @@ struct std::formatter<Wayland::ScannerTypes::ArgType> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Arg> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Arg> : FormatterNoParseArgs
 {
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Arg &s, FmtContext &ctx) const
+        format(const wl_gena::types::Arg &s, FmtContext &ctx) const
     {
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", s.name);
@@ -155,11 +155,11 @@ struct std::formatter<Wayland::ScannerTypes::Arg> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Enum::Entry> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Enum::Entry> : FormatterNoParseArgs
 {
     template <class FmtContext>
-    FmtContext::iterator format(
-        const Wayland::ScannerTypes::Enum::Entry &entry, FmtContext &ctx) const
+    FmtContext::iterator
+        format(const wl_gena::types::Enum::Entry &entry, FmtContext &ctx) const
     {
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", entry.name);
@@ -175,14 +175,13 @@ struct std::formatter<Wayland::ScannerTypes::Enum::Entry> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Enum> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Enum> : FormatterNoParseArgs
 {
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Enum &s, FmtContext &ctx) const
+        format(const wl_gena::types::Enum &s, FmtContext &ctx) const
     {
-        FormatVectorWrap<Wayland::ScannerTypes::Enum::Entry> fmt_entries(
-            s.entries);
+        FormatVectorWrap<wl_gena::types::Enum::Entry> fmt_entries(s.entries);
         std::format_to(
             ctx.out(),
             "{{\"name\":\"{}\",\"entries\":{}}}",
@@ -193,14 +192,14 @@ struct std::formatter<Wayland::ScannerTypes::Enum> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Message> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Message> : FormatterNoParseArgs
 {
     template <typename FmtContext>
     struct MessageTypenameVisitor
     {
         FmtContext &_ctx;
 
-        void operator()(const Wayland::ScannerTypes::Message::TypeDestructor &)
+        void operator()(const wl_gena::types::Message::TypeDestructor &)
         {
             std::format_to(_ctx.out(), "\"type\":\"DESTRUCTOR\"");
         }
@@ -208,7 +207,7 @@ struct std::formatter<Wayland::ScannerTypes::Message> : FormatterNoParseArgs
 
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Message &s, FmtContext &ctx) const
+        format(const wl_gena::types::Message &s, FmtContext &ctx) const
     {
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", s.name);
@@ -216,7 +215,7 @@ struct std::formatter<Wayland::ScannerTypes::Message> : FormatterNoParseArgs
             std::format_to(ctx.out(), ",");
             std::visit(MessageTypenameVisitor{ctx}, s.type.value());
         }
-        FormatVectorWrap<Wayland::ScannerTypes::Arg> arg_fmt{s.args};
+        FormatVectorWrap<wl_gena::types::Arg> arg_fmt{s.args};
         std::format_to(ctx.out(), ",");
         std::format_to(ctx.out(), "\"args\":{}", arg_fmt);
         if (s.since) {
@@ -229,54 +228,49 @@ struct std::formatter<Wayland::ScannerTypes::Message> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Request> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Request> : FormatterNoParseArgs
 {
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Request &s, FmtContext &ctx) const
+        format(const wl_gena::types::Request &s, FmtContext &ctx) const
     {
         std::format_to(
-            ctx.out(),
-            "{}",
-            static_cast<const Wayland::ScannerTypes::Message &>(s));
+            ctx.out(), "{}", static_cast<const wl_gena::types::Message &>(s));
         return ctx.out();
     }
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Event> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Event> : FormatterNoParseArgs
 {
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Event &s, FmtContext &ctx) const
+        format(const wl_gena::types::Event &s, FmtContext &ctx) const
     {
         std::format_to(
-            ctx.out(),
-            "{}",
-            static_cast<const Wayland::ScannerTypes::Message &>(s));
+            ctx.out(), "{}", static_cast<const wl_gena::types::Message &>(s));
         return ctx.out();
     }
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Interface> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Interface> : FormatterNoParseArgs
 {
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Interface &i, FmtContext &ctx) const
+        format(const wl_gena::types::Interface &i, FmtContext &ctx) const
     {
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", i.name);
         std::format_to(ctx.out(), ",");
         std::format_to(ctx.out(), "\"version\":{}", i.version);
-        FormatVectorWrap<Wayland::ScannerTypes::Request> request_fmt{
-            i.requests};
+        FormatVectorWrap<wl_gena::types::Request> request_fmt{i.requests};
         std::format_to(ctx.out(), ",");
         std::format_to(ctx.out(), "\"requests\":{}", request_fmt);
-        FormatVectorWrap<Wayland::ScannerTypes::Event> event_fmt{i.events};
+        FormatVectorWrap<wl_gena::types::Event> event_fmt{i.events};
         std::format_to(ctx.out(), ",");
         std::format_to(ctx.out(), "\"events\":{}", event_fmt);
-        FormatVectorWrap<Wayland::ScannerTypes::Enum> enums_fmt{i.enums};
+        FormatVectorWrap<wl_gena::types::Enum> enums_fmt{i.enums};
         std::format_to(ctx.out(), ",");
         std::format_to(ctx.out(), "\"enums\":{}", enums_fmt);
         std::format_to(ctx.out(), "}}");
@@ -285,11 +279,11 @@ struct std::formatter<Wayland::ScannerTypes::Interface> : FormatterNoParseArgs
 };
 
 template <>
-struct std::formatter<Wayland::ScannerTypes::Protocol> : FormatterNoParseArgs
+struct std::formatter<wl_gena::types::Protocol> : FormatterNoParseArgs
 {
     template <class FmtContext>
     FmtContext::iterator
-        format(const Wayland::ScannerTypes::Protocol &p, FmtContext &ctx) const
+        format(const wl_gena::types::Protocol &p, FmtContext &ctx) const
     {
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", p.name);

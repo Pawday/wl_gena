@@ -7,8 +7,8 @@
 #include <variant>
 #include <vector>
 
-namespace Wayland {
-namespace ScannerTypes {
+namespace wl_gena {
+namespace types {
 
 struct InterfaceNameable
 {
@@ -103,5 +103,5 @@ struct Protocol
     std::vector<Interface> interfaces;
 };
 
-} // namespace ScannerTypes
-} // namespace Wayland
+} // namespace types
+} // namespace wl_gena

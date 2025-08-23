@@ -22,7 +22,7 @@
 
 namespace {
 
-using InterfaceData = Wayland::ScannerTypes::Interface;
+using InterfaceData = wl_gena::types::Interface;
 
 struct InterfaceTraits
 {
@@ -68,7 +68,7 @@ struct TypeToStringVisitor
         }
         */
 
-    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+    using ArgTypes = wl_gena::types::ArgTypes;
 
 #define OVERLOAD(TYPE, type_literal)                                           \
     std::string operator()(ArgTypes::TYPE)                                     \
@@ -106,7 +106,7 @@ struct TypeToStringVisitor
     OVERLOAD(NullString, "/* nullptr */ const char *");
 
     std::string object_interface_name(
-        Wayland::ScannerTypes::InterfaceNameable &iface,
+        wl_gena::types::InterfaceNameable &iface,
         const std::string &orig_type_diag)
     {
         if (!iface.interface_name.has_value()) {
@@ -136,7 +136,7 @@ struct TypeToStringVisitor
 
 StringList emit_interface_listener_type_event(
     const std::string &iface_typename,
-    const Wayland::ScannerTypes::Event &ev,
+    const wl_gena::types::Event &ev,
     const InterfaceTraits &interface_traits)
 {
     StringList o;
@@ -175,7 +175,7 @@ StringList emit_interface_listener_type_event(
 
 StringList emit_interface_event_listener_type(
     const std::string &iface_typename,
-    const std::vector<Wayland::ScannerTypes::Event> &events,
+    const std::vector<wl_gena::types::Event> &events,
     const InterfaceTraits &interface_traits)
 {
     if (events.empty()) {
@@ -237,7 +237,7 @@ StringList emit_interface_ctor(
     return o;
 }
 
-StringList emit_enum(const Wayland::ScannerTypes::Enum &eenum)
+StringList emit_enum(const wl_gena::types::Enum &eenum)
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -291,8 +291,8 @@ StringList emit_enum(const Wayland::ScannerTypes::Enum &eenum)
 
 struct ArgInterfaceDependencyGetterVisitor
 {
-    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
-    using InterfaceNameable = Wayland::ScannerTypes::InterfaceNameable;
+    using ArgTypes = wl_gena::types::ArgTypes;
+    using InterfaceNameable = wl_gena::types::InterfaceNameable;
 
     std::optional<std::string> from_namable(const InterfaceNameable &n)
     {
@@ -328,8 +328,7 @@ struct ArgInterfaceDependencyGetterVisitor
 #undef OVERLOAD_N
 };
 
-std::optional<std::string>
-    get_arg_interface_dep(const Wayland::ScannerTypes::Arg &arg)
+std::optional<std::string> get_arg_interface_dep(const wl_gena::types::Arg &arg)
 {
     return std::visit(ArgInterfaceDependencyGetterVisitor{}, arg.type);
 }
@@ -345,7 +344,7 @@ std::unordered_set<std::string>
 {
     std::unordered_set<std::string> o;
 
-    std::vector<Wayland::ScannerTypes::Message> msgs;
+    std::vector<wl_gena::types::Message> msgs;
     for (auto &event : iface.events) {
         msgs.push_back(event);
     }
@@ -380,7 +379,7 @@ std::unordered_set<std::string>
 {
     std::unordered_set<std::string> o;
 
-    std::vector<Wayland::ScannerTypes::Message> msgs;
+    std::vector<wl_gena::types::Message> msgs;
     for (auto &event : iface.events) {
         msgs.push_back(event);
     }
@@ -392,7 +391,7 @@ std::unordered_set<std::string>
     for (auto &msg : msgs) {
         for (auto &arg : msg.args) {
 
-            using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+            using ArgTypes = wl_gena::types::ArgTypes;
             if (!std::holds_alternative<ArgTypes::UIntEnum>(arg.type)) {
                 continue;
             }
@@ -412,13 +411,13 @@ std::unordered_set<std::string>
 struct NewIDArg
 {
     std::string name;
-    Wayland::ScannerTypes::ArgTypes::NewID arg;
+    wl_gena::types::ArgTypes::NewID arg;
 };
 
 struct EmitRequestFunctionData
 {
     EmitRequestFunctionData(
-        const Wayland::ScannerTypes::Request &i_request,
+        const wl_gena::types::Request &i_request,
         const std::optional<NewIDArg> &i_return_type_op,
         const InterfaceTraits &i_interface_traits)
         : request(i_request), return_type_op(i_return_type_op),
@@ -426,7 +425,7 @@ struct EmitRequestFunctionData
     {
     }
 
-    const Wayland::ScannerTypes::Request &request;
+    const wl_gena::types::Request &request;
     const std::optional<NewIDArg> &return_type_op;
     const InterfaceTraits &interface_traits;
     std::string interface_name;
@@ -438,7 +437,7 @@ struct EmitRequestFunctionData
 StringList
     emit_interface_request_signature_args(const EmitRequestFunctionData &D)
 {
-    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
+    using NewID = wl_gena::types::ArgTypes::NewID;
 
     StringList args_strings;
     args_strings += std::format("// {}", __func__);
@@ -600,7 +599,7 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
 
     bool is_destructor = false;
     if (D.request.type.has_value()) {
-        using Message = Wayland::ScannerTypes::Message;
+        using Message = wl_gena::types::Message;
         Message::Type type = D.request.type.value();
         is_destructor = std::get_if<Message::TypeDestructor>(&type) != nullptr;
     }
@@ -611,8 +610,8 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
         args += "0";
     }
 
-    using Arg = Wayland::ScannerTypes::Arg;
-    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+    using Arg = wl_gena::types::Arg;
+    using ArgTypes = wl_gena::types::ArgTypes;
     for (const Arg &arg : D.request.args) {
         const ArgTypes::NewID *new_id_arg =
             std::get_if<ArgTypes::NewID>(&arg.type);
@@ -660,12 +659,12 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
 struct EmitSingleRequestData
 {
     EmitSingleRequestData(
-        const Wayland::ScannerTypes::Request &i_req,
+        const wl_gena::types::Request &i_req,
         const InterfaceTraits &i_interfaca_traits)
         : request{i_req}, interface_traits{i_interfaca_traits}
     {
     }
-    const Wayland::ScannerTypes::Request &request;
+    const wl_gena::types::Request &request;
     const InterfaceTraits &interface_traits;
     std::string interface_name;
     std::string request_index_name;
@@ -677,8 +676,8 @@ StringList emit_interface_request(const EmitSingleRequestData &D)
     StringList o;
     o += std::format("// {}", __func__);
 
-    using Arg = Wayland::ScannerTypes::Arg;
-    using NewID = Wayland::ScannerTypes::ArgTypes::NewID;
+    using Arg = wl_gena::types::Arg;
+    using NewID = wl_gena::types::ArgTypes::NewID;
 
     auto is_new_id = [](const Arg &arg) {
         return std::holds_alternative<NewID>(arg.type);
@@ -915,7 +914,7 @@ std::vector<InterfaceData>
 }
 
 StringList emit_object_forward(
-    const std::vector<Wayland::ScannerTypes::Interface> &interfaces)
+    const std::vector<wl_gena::types::Interface> &interfaces)
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -954,7 +953,7 @@ namespace rtti {
 
 struct ArgsSignantureVisitor
 {
-    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
+    using ArgTypes = wl_gena::types::ArgTypes;
 #define OVERLOAD(TYPE, type_literal)                                           \
     std::string operator()(const ArgTypes::TYPE &)                             \
     {                                                                          \
@@ -983,8 +982,8 @@ struct ArgsSignantureVisitor
 
 struct ArgsTypesVisitor
 {
-    using ArgTypes = Wayland::ScannerTypes::ArgTypes;
-    using InterfaceNameable = Wayland::ScannerTypes::InterfaceNameable;
+    using ArgTypes = wl_gena::types::ArgTypes;
+    using InterfaceNameable = wl_gena::types::InterfaceNameable;
 
 #define OVERLOAD(TYPE)                                                         \
     std::optional<std::string> operator()(const ArgTypes::TYPE &)              \
@@ -1027,7 +1026,7 @@ struct Arg
 
 struct Message
 {
-    Message(const Wayland::ScannerTypes::Message &msg)
+    Message(const wl_gena::types::Message &msg)
     {
         name = msg.name;
 

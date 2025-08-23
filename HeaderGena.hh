@@ -10,7 +10,7 @@ namespace wl_gena {
 
 struct GenerateHeaderInput
 {
-    Wayland::ScannerTypes::Protocol protocol;
+    wl_gena::types::Protocol protocol;
     std::optional<std::string> top_namespace_id;
     std::vector<std::string> includes;
 };
