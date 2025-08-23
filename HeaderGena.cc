@@ -92,12 +92,12 @@ struct TypeToStringVisitor
         std::string enum_name = e.name;
         if (e.interface_name.has_value()) {
             enum_name = std::format(
-                "{}_interface<{}>::{}",
+                "typename {}_interface<{}>::{}",
                 e.interface_name.value(),
                 _traits.typename_string,
                 enum_name);
         }
-        return std::format("enum {}", enum_name);
+        return std::format("{}_e", enum_name);
     };
 
     OVERLOAD(Fixed, "/* wl_fixed_t */ int32_t");
@@ -243,7 +243,7 @@ StringList emit_enum(const wl_gena::types::Enum &eenum)
     StringList o;
     o += std::format("// {}", __func__);
 
-    o += std::format("enum class {}", eenum.name);
+    o += std::format("enum class {}_e", eenum.name);
     o += "{";
 
     StringList es;
