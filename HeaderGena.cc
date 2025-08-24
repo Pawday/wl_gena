@@ -20,6 +20,33 @@
 #include "StringList.hh"
 #include "Types.hh"
 
+namespace wl_gena {
+
+struct HeaderGenerator
+{
+    StringList generate() const;
+    StringList emit_object_forward() const;
+    StringList emit_rtti_struct() const;
+    StringList emit_rtti() const;
+
+    auto topo_sort_interfaces() const -> std::vector<wl_gena::types::Interface>;
+
+    types::Protocol &protocol()
+    {
+        return _protocol;
+    }
+
+    std::vector<std::string> &includes()
+    {
+        return _includes;
+    }
+
+  private:
+    types::Protocol _protocol;
+    std::vector<std::string> _includes;
+};
+} // namespace wl_gena
+
 namespace {
 
 using InterfaceData = wl_gena::types::Interface;
@@ -882,12 +909,13 @@ StringList emit_interface(const InterfaceData &iface)
 
     return o;
 }
+} // namespace
 
-std::vector<InterfaceData>
-    topo_sort_interfaces(const std::vector<InterfaceData> &in)
+auto wl_gena::HeaderGenerator::topo_sort_interfaces() const
+    -> std::vector<wl_gena::types::Interface>
 {
     std::unordered_map<std::string, InterfaceData> ifaces;
-    for (auto &iface : in) {
+    for (auto &iface : _protocol.interfaces) {
         ifaces.insert({iface.name, iface});
     }
 
@@ -914,11 +942,12 @@ std::vector<InterfaceData>
     return o;
 }
 
-StringList emit_object_forward(
-    const std::vector<wl_gena::types::Interface> &interfaces)
+StringList wl_gena::HeaderGenerator::emit_object_forward() const
 {
     StringList o;
     o += std::format("// {}", __func__);
+
+    const std::vector<types::Interface> &interfaces = _protocol.interfaces;
 
     std::unordered_set<std::string> emited;
 
@@ -950,6 +979,7 @@ StringList emit_object_forward(
     return o;
 }
 
+namespace {
 namespace rtti {
 
 struct ArgsSignantureVisitor
@@ -1262,18 +1292,20 @@ StringList
 
     return o;
 }
+} // namespace
 
-StringList emit_rtti_struct(const rtti::Protocol &proto)
+StringList wl_gena::HeaderGenerator::emit_rtti_struct() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
     o += "template <typename traits>";
-    o += "struct rtti {";
+    o += "struct rtti";
+    o += "{";
     o += "    static const typename traits::wl_interface_t *types[];";
     o += "";
     bool first = true;
-    for (auto &interface : proto.interfaces) {
+    for (auto &interface : _protocol.interfaces) {
         auto iface_members =
             emit_rtti_interface_struct_members_forward(interface);
         iface_members.leftPad("    ");
@@ -1288,6 +1320,8 @@ StringList emit_rtti_struct(const rtti::Protocol &proto)
 
     return o;
 }
+
+namespace {
 
 StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
 {
@@ -1471,11 +1505,14 @@ StringList emit_rtti_interface_struct_members(
     return o;
 }
 
-StringList emit_rtti(const rtti::Protocol &proto)
+} // namespace
+
+StringList wl_gena::HeaderGenerator::emit_rtti() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
+    rtti::Protocol proto{_protocol.interfaces};
     o += emit_rtti_interface_struct_types_member(proto);
 
     o += "";
@@ -1493,19 +1530,14 @@ StringList emit_rtti(const rtti::Protocol &proto)
     return o;
 }
 
-} // namespace
-
-namespace wl_gena {
-
-GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
+StringList wl_gena::HeaderGenerator::generate() const
 {
-    auto interfaces = I.protocol.interfaces;
-    auto sorted_interfaces = topo_sort_interfaces(interfaces);
+    auto sorted_interfaces = topo_sort_interfaces();
 
     StringList o;
     o += "#pragma once";
     o += "";
-    for (const std::string &include_file : I.includes) {
+    for (const std::string &include_file : _includes) {
         o += std::format("#include {}", include_file);
     }
 
@@ -1514,14 +1546,13 @@ GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
     o += "struct wl_proxy;";
 
     o += "";
-    o += emit_object_forward(interfaces);
+    o += emit_object_forward();
 
     o += "";
-    o += std::format("namespace {} {{", I.protocol.name);
+    o += std::format("namespace {} {{", _protocol.name);
 
     o += "";
-    auto rtti_struct = emit_rtti_struct(interfaces);
-    o += std::move(rtti_struct);
+    o += emit_rtti_struct();
 
     o += "";
     bool first = true;
@@ -1534,9 +1565,9 @@ GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
     }
 
     o += "";
-    o += emit_rtti(interfaces);
+    o += emit_rtti();
 
-    o += std::format("}} // namespace {}", I.protocol.name);
+    o += std::format("}} // namespace {}", _protocol.name);
 
     auto make_empty_if_blank = [](std::string &str) {
         for (auto c : str) {
@@ -1550,11 +1581,27 @@ GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
     std::string output;
     for (auto &o_line : o.get()) {
         make_empty_if_blank(o_line);
+    }
+
+    return o;
+};
+
+namespace wl_gena {
+
+GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
+{
+    HeaderGenerator gena;
+    gena.protocol() = I.protocol;
+    gena.includes() = I.includes;
+
+    auto lines = gena.generate();
+
+    std::string output;
+    for (auto &o_line : lines.get()) {
         output += o_line;
         output += '\n';
     }
 
     return GenerateHeaderOutput{std::move(output)};
 }
-
 } // namespace wl_gena
