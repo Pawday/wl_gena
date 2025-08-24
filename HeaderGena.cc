@@ -2,10 +2,8 @@
 #include <format>
 #include <optional>
 #include <ranges>
-#include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -23,6 +21,14 @@
 #include "Types.hh"
 
 namespace wl_gena {
+
+struct InterfaceTraits
+{
+    std::string typename_string;
+    std::string wayland_client_core_functions_typename;
+    std::string wayland_client_core_wl_interface_typename;
+    std::string wayland_client_core_wl_message_typename;
+};
 
 struct HeaderGenerator
 {
@@ -47,18 +53,113 @@ struct HeaderGenerator
     types::Protocol _protocol;
     std::vector<std::string> _includes;
 };
-} // namespace wl_gena
 
-namespace {
-
-using InterfaceData = wl_gena::types::Interface;
-
-struct InterfaceTraits
+struct InterfaceGenerator
 {
-    std::string typename_string;
-    std::string wayland_client_core_functions_typename;
-    std::string wayland_client_core_wl_interface_typename;
-    std::string wayland_client_core_wl_message_typename;
+    InterfaceGenerator(wl_gena::types::Interface &interface)
+        : _interface(interface)
+    {
+        _traits.typename_string = std::format("{}_traits", _interface.name);
+        _traits.wayland_client_core_functions_typename =
+            std::format("{}::client_core_functions_t", _traits.typename_string);
+        _traits.wayland_client_core_wl_interface_typename =
+            std::format("{}::wl_interface_t", _traits.typename_string);
+        _traits.wayland_client_core_wl_message_typename =
+            std::format("{}::wl_message_t", _traits.typename_string);
+    }
+
+    StringList generate() const;
+    StringList emit_enums() const;
+    static StringList emit_enum(const wl_gena::types::Enum &eenum);
+    StringList emit_interface_event_listener_type() const;
+    StringList emit_interface_ctor() const;
+    StringList emit_interface_add_listener_member_fn() const;
+    StringList emit_interface_requests() const;
+
+    InterfaceGenerator(const InterfaceGenerator &) = delete;
+    InterfaceGenerator(InterfaceGenerator &&) = delete;
+    InterfaceGenerator &operator=(const InterfaceGenerator &) = delete;
+    InterfaceGenerator &operator=(InterfaceGenerator &&) = delete;
+
+  private:
+    wl_gena::types::Interface &_interface;
+    InterfaceTraits _traits;
+};
+
+struct RequestGenerator
+{
+    struct NewIDArg
+    {
+        std::string name;
+        wl_gena::types::ArgTypes::NewID arg;
+    };
+
+    RequestGenerator(
+        const wl_gena::types::Request &request,
+        const InterfaceTraits &traits,
+        std::string interface_name,
+        std::string request_index_name)
+        : _request(request), _traits{traits},
+          _interface_name{std::move(interface_name)},
+          _request_index_name{std::move(request_index_name)},
+          _first_arg_name{std::format("{}_ptr", _interface_name)},
+          _new_id_inteface_name{"interface"}
+    {
+        namespace V = std::views;
+
+        using Arg = wl_gena::types::Arg;
+        using NewID = wl_gena::types::ArgTypes::NewID;
+
+        auto is_new_id = [](const Arg &arg) {
+            return std::holds_alternative<NewID>(arg.type);
+        };
+
+        auto to_new_id_arg = [](const Arg &arg) {
+            return NewIDArg{arg.name, std::get<NewID>(arg.type)};
+        };
+
+        _new_ids = std::ranges::to<std::vector>(
+            _request.args | V::filter(is_new_id) | V::transform(to_new_id_arg));
+        if (!_new_ids.empty()) {
+            _return_type = _new_ids[0];
+        }
+    }
+
+    StringList emit_interface_request() const;
+    StringList emit_interface_request_signature_args() const;
+    StringList emit_interface_request_body() const;
+
+  private:
+    const wl_gena::types::Request &_request;
+    const InterfaceTraits &_traits;
+    std::string _interface_name;
+    std::string _request_index_name;
+
+    std::vector<NewIDArg> _new_ids;
+
+    std::optional<NewIDArg> _return_type;
+    std::string _first_arg_name;
+    std::string _new_id_inteface_name;
+};
+
+struct InterfaceDependencyViewer
+{
+    explicit InterfaceDependencyViewer(
+        const wl_gena::types::Interface &interface)
+        : _interface(interface)
+    {
+    }
+
+    auto enums() const -> std::unordered_set<std::string>;
+
+    InterfaceDependencyViewer(const InterfaceDependencyViewer &) = delete;
+    InterfaceDependencyViewer(InterfaceDependencyViewer &&) = delete;
+    InterfaceDependencyViewer &
+        operator=(const InterfaceDependencyViewer &) = delete;
+    InterfaceDependencyViewer &operator=(InterfaceDependencyViewer &&) = delete;
+
+  private:
+    const wl_gena::types::Interface &_interface;
 };
 
 struct TypeToStringVisitor
@@ -163,6 +264,7 @@ struct TypeToStringVisitor
     const InterfaceTraits &_traits;
 };
 
+namespace {
 StringList emit_interface_listener_type_event(
     const std::string &iface_typename,
     const wl_gena::types::Event &ev,
@@ -201,13 +303,11 @@ StringList emit_interface_listener_type_event(
 
     return o;
 }
+} // namespace
 
-StringList emit_interface_event_listener_type(
-    const std::string &iface_typename,
-    const std::vector<wl_gena::types::Event> &events,
-    const InterfaceTraits &interface_traits)
+StringList InterfaceGenerator::emit_interface_event_listener_type() const
 {
-    if (events.empty()) {
+    if (_interface.events.empty()) {
         throw std::logic_error("Cannot generate listener for empty events");
     }
 
@@ -216,13 +316,13 @@ StringList emit_interface_event_listener_type(
     o += "struct listener_t";
     o += "{";
     bool first = true;
-    for (auto &event : events) {
+    for (auto &event : _interface.events) {
         if (!first) {
             o += "";
         }
         first = false;
-        auto typedef_str = emit_interface_listener_type_event(
-            iface_typename, event, interface_traits);
+        auto typedef_str =
+            emit_interface_listener_type_event(_interface.name, event, _traits);
         typedef_str.leftPad("    ");
         o += std::move(typedef_str);
     }
@@ -231,10 +331,10 @@ StringList emit_interface_event_listener_type(
     return o;
 }
 
-StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
+StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
 {
     StringList o;
-    std::string n = iface.name;
+    std::string &n = _interface.name;
 
     o += std::format("// {}", __func__);
     o += std::format(
@@ -255,19 +355,36 @@ StringList emit_interface_add_listener_member_fn(const InterfaceData &iface)
     return o;
 }
 
-StringList emit_interface_ctor(
-    const InterfaceData &iface, const InterfaceTraits &interface_traits)
+StringList InterfaceGenerator::emit_interface_ctor() const
 {
     StringList o;
     o += std::format("// {}", __func__);
     o += std::format(
         "{}_interface(typename {} &core) : _core{{core}}{{}};",
-        iface.name,
-        interface_traits.wayland_client_core_functions_typename);
+        _interface.name,
+        _traits.wayland_client_core_functions_typename);
     return o;
 }
 
-StringList emit_enum(const wl_gena::types::Enum &eenum)
+StringList wl_gena::InterfaceGenerator::emit_enums() const
+{
+    StringList o;
+    o += std::format("// {}", __func__);
+
+    bool first = true;
+    for (auto &e : _interface.enums) {
+        if (!first) {
+            o += "";
+        }
+        first = false;
+        o += emit_enum(e);
+    }
+
+    return o;
+};
+
+auto wl_gena::InterfaceGenerator::emit_enum(const wl_gena::types::Enum &eenum)
+    -> StringList
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -319,6 +436,8 @@ StringList emit_enum(const wl_gena::types::Enum &eenum)
     return o;
 }
 
+namespace {
+
 struct ArgInterfaceDependencyGetterVisitor
 {
     using ArgTypes = wl_gena::types::ArgTypes;
@@ -362,59 +481,19 @@ std::optional<std::string> get_arg_interface_dep(const wl_gena::types::Arg &arg)
 {
     return std::visit(ArgInterfaceDependencyGetterVisitor{}, arg.type);
 }
+} // namespace
 
-/*
- * TODO: Remove code duplication in:
- *  interface_get_dep_names
- *  and
- *  interface_get_enum_dep_names
- */
-std::unordered_set<std::string>
-    interface_get_dep_names(const InterfaceData &iface)
+auto wl_gena::InterfaceDependencyViewer::enums() const
+    -> std::unordered_set<std::string>
 {
     std::unordered_set<std::string> o;
 
     std::vector<wl_gena::types::Message> msgs;
-    for (auto &event : iface.events) {
+    for (auto &event : _interface.events) {
         msgs.push_back(event);
     }
 
-    for (auto &req : iface.requests) {
-        msgs.push_back(req);
-    }
-
-    for (auto &msg : msgs) {
-        for (auto &arg : msg.args) {
-
-            std::optional<std::string> dep_iface_name =
-                get_arg_interface_dep(arg);
-            if (!dep_iface_name.has_value()) {
-                continue;
-            }
-            o.insert(dep_iface_name.value());
-        }
-    }
-
-    return o;
-}
-
-/*
- * TODO: Remove code duplication in:
- *  interface_get_dep_names
- *  and
- *  interface_get_enum_dep_names
- */
-std::unordered_set<std::string>
-    interface_get_enum_dep_names(const InterfaceData &iface)
-{
-    std::unordered_set<std::string> o;
-
-    std::vector<wl_gena::types::Message> msgs;
-    for (auto &event : iface.events) {
-        msgs.push_back(event);
-    }
-
-    for (auto &req : iface.requests) {
+    for (auto &req : _interface.requests) {
         msgs.push_back(req);
     }
 
@@ -438,34 +517,7 @@ std::unordered_set<std::string>
     return o;
 }
 
-struct NewIDArg
-{
-    std::string name;
-    wl_gena::types::ArgTypes::NewID arg;
-};
-
-struct EmitRequestFunctionData
-{
-    EmitRequestFunctionData(
-        const wl_gena::types::Request &i_request,
-        const std::optional<NewIDArg> &i_return_type_op,
-        const InterfaceTraits &i_interface_traits)
-        : request(i_request), return_type_op(i_return_type_op),
-          interface_traits{i_interface_traits}
-    {
-    }
-
-    const wl_gena::types::Request &request;
-    const std::optional<NewIDArg> &return_type_op;
-    const InterfaceTraits &interface_traits;
-    std::string interface_name;
-    std::string first_arg_name;
-    std::string request_index_name;
-    std::string new_id_inteface_name;
-};
-
-StringList
-    emit_interface_request_signature_args(const EmitRequestFunctionData &D)
+StringList RequestGenerator::emit_interface_request_signature_args() const
 {
     using NewID = wl_gena::types::ArgTypes::NewID;
 
@@ -511,18 +563,17 @@ StringList
     std::vector<ArgEmitInfo> signature_args;
 
     signature_args.emplace_back(
-        std::format("{} *{}", D.interface_name, D.first_arg_name));
+        std::format("{} *{}", _interface_name, _first_arg_name));
 
-    for (auto &arg : D.request.args) {
+    for (auto &arg : _request.args) {
         const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
         if (arg_new_id_p != nullptr) {
             auto arg_interface_name = arg_new_id_p->interface_name;
             if (!arg_interface_name) {
                 std::string arg_str = std::format(
                     "const {} *{}",
-                    D.interface_traits
-                        .wayland_client_core_wl_interface_typename,
-                    D.new_id_inteface_name);
+                    _traits.wayland_client_core_wl_interface_typename,
+                    _new_id_inteface_name);
                 signature_args.emplace_back(arg_str);
                 signature_args.emplace_back("uint32_t version");
                 continue;
@@ -541,7 +592,7 @@ StringList
         }
 
         std::string arg_typename =
-            std::visit(TypeToStringVisitor{D.interface_traits}, arg.type);
+            std::visit(TypeToStringVisitor{_traits}, arg.type);
         signature_args.emplace_back(
             std::format("{} {}", arg_typename, arg.name));
     }
@@ -570,24 +621,23 @@ StringList
     return args_strings;
 }
 
-StringList emit_interface_request_body(const EmitRequestFunctionData &D)
+StringList RequestGenerator::emit_interface_request_body() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
     std::string first_arg_proxy_id =
-        std::format("{}_as_proxy", D.first_arg_name);
+        std::format("{}_as_proxy", _first_arg_name);
     std::string first_arg_proxy;
     first_arg_proxy += std::format("wl_proxy *{}", first_arg_proxy_id);
     first_arg_proxy += " = reinterpret_cast<wl_proxy*>(";
-    first_arg_proxy += std::format("{}", D.first_arg_name);
+    first_arg_proxy += std::format("{}", _first_arg_name);
     first_arg_proxy += ");";
     o += std::move(first_arg_proxy);
 
     std::optional<std::string> output_identifier;
-    if (D.return_type_op.has_value()) {
-        output_identifier =
-            std::format("out_{}", D.return_type_op.value().name);
+    if (_return_type.has_value()) {
+        output_identifier = std::format("out_{}", _return_type.value().name);
         o += std::format("wl_proxy *{} = nullptr;", output_identifier.value());
     }
 
@@ -603,24 +653,23 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
 
     StringList args;
     args += std::format("{}", first_arg_proxy_id);
-    args += std::string{D.request_index_name};
+    args += std::string{_request_index_name};
 
-    if (D.return_type_op) {
-        const NewIDArg &return_type = D.return_type_op.value();
+    if (_return_type) {
+        const NewIDArg &return_type = _return_type.value();
         if (return_type.arg.interface_name) {
             args += std::format(
                 "&rtti<{}>::{}_interface",
-                D.interface_traits.typename_string,
+                _traits.typename_string,
                 return_type.arg.interface_name.value());
         } else {
-            args += std::string{D.new_id_inteface_name};
+            args += std::string{_new_id_inteface_name};
         }
     } else {
         args += "nullptr";
     }
 
-    if (D.return_type_op &&
-        !D.return_type_op.value().arg.interface_name.has_value()) {
+    if (_return_type && !_return_type.value().arg.interface_name.has_value()) {
         args += "version";
     } else {
         args +=
@@ -628,9 +677,9 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
     }
 
     bool is_destructor = false;
-    if (D.request.type.has_value()) {
+    if (_request.type.has_value()) {
         using Message = wl_gena::types::Message;
-        Message::Type type = D.request.type.value();
+        Message::Type type = _request.type.value();
         is_destructor = std::get_if<Message::TypeDestructor>(&type) != nullptr;
     }
 
@@ -642,14 +691,14 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
 
     using Arg = wl_gena::types::Arg;
     using ArgTypes = wl_gena::types::ArgTypes;
-    for (const Arg &arg : D.request.args) {
+    for (const Arg &arg : _request.args) {
         const ArgTypes::NewID *new_id_arg =
             std::get_if<ArgTypes::NewID>(&arg.type);
         bool is_new_id = new_id_arg != nullptr;
         if (is_new_id) {
             bool no_interface = !new_id_arg->interface_name.has_value();
             if (no_interface) {
-                args += std::format("{}->name", D.new_id_inteface_name);
+                args += std::format("{}->name", _new_id_inteface_name);
                 args += "version";
             }
             args += "nullptr";
@@ -672,61 +721,25 @@ StringList emit_interface_request_body(const EmitRequestFunctionData &D)
     o += std::move(args);
     o += ");";
 
-    if (D.return_type_op &&
-        !D.return_type_op.value().arg.interface_name.has_value()) {
+    if (_return_type && !_return_type.value().arg.interface_name.has_value()) {
         o += std::format(
             "return reinterpret_cast<void*>({});", output_identifier.value());
-    } else if (D.return_type_op) {
+    } else if (_return_type) {
         o += std::format(
             "return reinterpret_cast<{}*>({});",
-            D.return_type_op.value().arg.interface_name.value(),
+            _return_type.value().arg.interface_name.value(),
             output_identifier.value());
     }
 
     return o;
 }
 
-struct EmitSingleRequestData
-{
-    EmitSingleRequestData(
-        const wl_gena::types::Request &i_req,
-        const InterfaceTraits &i_interfaca_traits)
-        : request{i_req}, interface_traits{i_interfaca_traits}
-    {
-    }
-    const wl_gena::types::Request &request;
-    const InterfaceTraits &interface_traits;
-    std::string interface_name;
-    std::string request_index_name;
-    std::string interface_rtty_typename;
-};
-
-StringList emit_interface_request(const EmitSingleRequestData &D)
+StringList RequestGenerator::emit_interface_request() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
-    using Arg = wl_gena::types::Arg;
-    using NewID = wl_gena::types::ArgTypes::NewID;
-
-    auto is_new_id = [](const Arg &arg) {
-        return std::holds_alternative<NewID>(arg.type);
-    };
-
-    auto to_new_id_arg = [](const Arg &arg) {
-        return NewIDArg{arg.name, std::get<NewID>(arg.type)};
-    };
-
-    namespace V = std::views;
-    std::vector<NewIDArg> new_ids = std::ranges::to<std::vector>(
-        D.request.args | V::filter(is_new_id) | V::transform(to_new_id_arg));
-
-    std::optional<NewIDArg> return_type;
-    if (!new_ids.empty()) {
-        return_type = new_ids[0];
-    }
-
-    if (new_ids.size() > 1) {
+    if (_new_ids.size() > 1) {
         /*
          * I have no idea why it is that way:
          * Reference implementation seems to ignore requests with
@@ -737,9 +750,9 @@ StringList emit_interface_request(const EmitSingleRequestData &D)
         o += "/*";
         o += std::format(
             " * Multiple new_id args: Ignore [{}] request generation",
-            D.request.name);
+            _request.name);
         size_t new_id_name_i = 0;
-        for (auto &new_id : new_ids) {
+        for (auto &new_id : _new_ids) {
             o += std::format(" * new_id[{}] {}", new_id_name_i, new_id.name);
             new_id_name_i++;
         }
@@ -748,30 +761,23 @@ StringList emit_interface_request(const EmitSingleRequestData &D)
     }
 
     std::string return_type_string = "void";
-    if (return_type.has_value()) {
+    if (_return_type.has_value()) {
         return_type_string = "void *";
-        auto &new_id = return_type.value().arg;
+        auto &new_id = _return_type.value().arg;
         if (new_id.interface_name.has_value()) {
             return_type_string =
                 std::format("{}*", new_id.interface_name.value());
         }
     }
 
-    EmitRequestFunctionData emit_fn_data{
-        D.request, return_type, D.interface_traits};
-    emit_fn_data.interface_name = D.interface_name;
-    emit_fn_data.first_arg_name = std::format("{}_ptr", D.interface_name);
-    emit_fn_data.request_index_name = D.request_index_name;
-    emit_fn_data.new_id_inteface_name = "interface";
-
-    auto signature_args = emit_interface_request_signature_args(emit_fn_data);
+    auto signature_args = emit_interface_request_signature_args();
     signature_args.leftPad("    ");
 
-    o += std::format("{} {}(", return_type_string, D.request.name);
+    o += std::format("{} {}(", return_type_string, _request.name);
     o += std::move(signature_args);
     o += ")";
 
-    StringList body = emit_interface_request_body(emit_fn_data);
+    StringList body = emit_interface_request_body();
 
     o += "{";
     body.leftPad("    ");
@@ -781,24 +787,13 @@ StringList emit_interface_request(const EmitSingleRequestData &D)
     return o;
 }
 
-struct EmitInterfaceRequestsData
-{
-    EmitInterfaceRequestsData(
-        const InterfaceData &i_iface, const InterfaceTraits &i_interface_traits)
-        : iface{i_iface}, interface_traits{i_interface_traits}
-    {
-    }
-    const InterfaceData &iface;
-    const InterfaceTraits &interface_traits;
-};
-
-StringList emit_interface_requests(const EmitInterfaceRequestsData &D)
+StringList InterfaceGenerator::emit_interface_requests() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
     size_t next_req_index = 0;
-    for (auto &request : D.iface.requests) {
+    for (auto &request : _interface.requests) {
         auto req_i = next_req_index;
         next_req_index++;
         if (req_i != 0) {
@@ -808,31 +803,22 @@ StringList emit_interface_requests(const EmitInterfaceRequestsData &D)
             std::format("request_index_{}", request.name);
         o += std::format(
             "static constexpr size_t {} = {};", request_index_name, req_i);
-        EmitSingleRequestData iface_emit_data{request, D.interface_traits};
-        iface_emit_data.interface_name = D.iface.name;
-        iface_emit_data.request_index_name = request_index_name;
-        o += emit_interface_request(iface_emit_data);
+        RequestGenerator req_gen{
+            request, _traits, _interface.name, request_index_name};
+        o += req_gen.emit_interface_request();
     }
 
     return o;
 }
 
-StringList emit_interface(const InterfaceData &iface)
+StringList wl_gena::InterfaceGenerator::generate() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
-    InterfaceTraits traits;
-    traits.typename_string = std::format("{}_traits", iface.name);
-    traits.wayland_client_core_functions_typename =
-        std::format("{}::client_core_functions_t", traits.typename_string);
-    traits.wayland_client_core_wl_interface_typename =
-        std::format("{}::wl_interface_t", traits.typename_string);
-    traits.wayland_client_core_wl_message_typename =
-        std::format("{}::wl_message_t", traits.typename_string);
-
     {
-        auto enum_deps = interface_get_enum_dep_names(iface);
+        InterfaceDependencyViewer deps_view{_interface};
+        auto enum_deps = deps_view.enums();
         if (!enum_deps.empty()) {
             o += "";
             StringList deps;
@@ -847,8 +833,8 @@ StringList emit_interface(const InterfaceData &iface)
         }
     }
 
-    o += std::format("template <typename {}>", traits.typename_string);
-    o += std::format("struct {}_interface", iface.name);
+    o += std::format("template <typename {}>", _traits.typename_string);
+    o += std::format("struct {}_interface", _interface.name);
     o += "{";
     bool has_structure = false;
     auto add_sep = [&has_structure, &o]() {
@@ -858,46 +844,37 @@ StringList emit_interface(const InterfaceData &iface)
         has_structure = true;
     };
 
-    {
-        for (auto &e : iface.enums) {
-            add_sep();
-            StringList eenum = emit_enum(e);
-            eenum.leftPad("    ");
+    add_sep();
+    auto enums = emit_enums();
+    enums.leftPad("    ");
+    o += std::move(enums);
 
-            o += std::move(eenum);
-        }
-    }
-
-    bool has_events = !iface.events.empty();
+    bool has_events = !_interface.events.empty();
     if (has_events) {
         add_sep();
 
-        const std::string &interface_typename = iface.name;
-        StringList type = emit_interface_event_listener_type(
-            interface_typename, iface.events, traits);
+        StringList type = emit_interface_event_listener_type();
         type.leftPad("    ");
         o += std::move(type);
     }
 
     {
         add_sep();
-        StringList ctor = emit_interface_ctor(iface, traits);
+        StringList ctor = emit_interface_ctor();
         ctor.leftPad("    ");
         o += std::move(ctor);
     }
 
     if (has_events) {
         add_sep();
-        StringList add_listener_code =
-            emit_interface_add_listener_member_fn(iface);
+        StringList add_listener_code = emit_interface_add_listener_member_fn();
         add_listener_code.leftPad("    ");
         o += std::move(add_listener_code);
     }
 
     {
         add_sep();
-        EmitInterfaceRequestsData data{iface, traits};
-        StringList requests = emit_interface_requests(data);
+        StringList requests = emit_interface_requests();
         requests.leftPad("    ");
         o += std::move(requests);
     }
@@ -906,17 +883,16 @@ StringList emit_interface(const InterfaceData &iface)
     o += "private:";
     o += std::format(
         "    typename {} &_core;",
-        traits.wayland_client_core_functions_typename);
+        _traits.wayland_client_core_functions_typename);
     o += "};";
 
     return o;
 }
-} // namespace
 
 auto wl_gena::HeaderGenerator::topo_sort_interfaces() const
     -> std::vector<wl_gena::types::Interface>
 {
-    std::unordered_map<std::string, InterfaceData> ifaces;
+    std::unordered_map<std::string, wl_gena::types::Interface> ifaces;
     for (auto &iface : _protocol.interfaces) {
         ifaces.insert({iface.name, iface});
     }
@@ -929,13 +905,14 @@ auto wl_gena::HeaderGenerator::topo_sort_interfaces() const
     for (auto &iface : ifaces) {
         // TODO: Deal with different type of dependecies
         // (all types form a cycles)
-        auto deps = interface_get_enum_dep_names(iface.second);
+        InterfaceDependencyViewer deps_view{iface.second};
+        auto deps = deps_view.enums();
         for (auto &dep_name : deps) {
             graph.add_dependency(dep_name, iface.first);
         }
     }
 
-    std::vector<InterfaceData> o;
+    std::vector<wl_gena::types::Interface> o;
     auto sorted_names = graph.topo_sorted();
     for (auto &name : sorted_names) {
         o.emplace_back(std::move(ifaces.at(name)));
@@ -960,7 +937,8 @@ StringList wl_gena::HeaderGenerator::emit_object_forward() const
     }
 
     for (auto &iface : interfaces) {
-        auto deps = interface_get_dep_names(iface);
+        InterfaceDependencyViewer dep_view{iface};
+        auto deps = dep_view.enums();
 
         for (auto &emited_el : emited) {
             deps.erase(emited_el);
@@ -980,6 +958,8 @@ StringList wl_gena::HeaderGenerator::emit_object_forward() const
 
     return o;
 }
+
+} // namespace wl_gena
 
 namespace {
 namespace rtti {
@@ -1090,7 +1070,7 @@ struct Message
 
 struct Interface
 {
-    Interface(const InterfaceData &iface)
+    Interface(const wl_gena::types::Interface &iface)
     {
         name = iface.name;
         version = iface.version;
@@ -1250,7 +1230,7 @@ struct TypeArrayInfo
 
 struct Protocol
 {
-    Protocol(const std::vector<InterfaceData> &i_interfaces)
+    Protocol(const std::vector<wl_gena::types::Interface> &i_interfaces)
     {
         for (auto &iface : i_interfaces) {
             interfaces.emplace_back(iface);
@@ -1587,13 +1567,16 @@ StringList wl_gena::HeaderGenerator::generate() const
     o += emit_rtti_struct();
 
     o += "";
+
     bool first = true;
     for (auto &iface : sorted_interfaces) {
         if (!first) {
             o += "";
         }
         first = false;
-        o += emit_interface(iface);
+
+        InterfaceGenerator iface_gena{iface};
+        o += iface_gena.generate();
     }
 
     o += "";
