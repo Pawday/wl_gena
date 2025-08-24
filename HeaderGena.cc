@@ -2,8 +2,10 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -1335,55 +1337,85 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
     o += "template <typename traits>";
     o += std::format("{} {{", sig);
 
-    StringList types_array_entries;
+    struct RTTITypeEntry
+    {
+        std::string type;
+        size_t index;
+        std::string debug;
+    };
 
-    types_array_entries += [&proto]() {
+    std::vector<RTTITypeEntry> types_array_entries;
+
+    {
         size_t null_run_length = proto.type_array_info().null_run_length;
 
         size_t types_array_offset = 0;
-        StringList types_list;
+        RTTITypeEntry entry;
+        entry.type = "nullptr";
+        entry.debug = "[null_run_stub]";
         for (size_t nul_i = 0; nul_i != null_run_length; ++nul_i) {
-            types_list += std::format(
-                "/* [{}][null_run_stub] */ nullptr", types_array_offset);
-            types_array_offset++;
+            entry.index = types_array_offset++;
+            types_array_entries.push_back(entry);
         }
-        types_list.leftPad("    ");
-        return types_list;
-    }();
+    }
 
-    types_array_entries += [&proto]() {
-        StringList o_l;
-
+    {
         auto &type_array = proto.type_array_info().array;
         size_t null_run_offset = proto.type_array_info().null_run_length;
 
-        for (auto &type_entry : type_array) {
-
-            std::string info_comment = std::format(
-                "/* [{}][{}.{}.{}] */",
-                type_entry.index.value() + null_run_offset,
+        for (const rtti::TypeArrayInfo::Entry &type_entry : type_array) {
+            RTTITypeEntry entry;
+            entry.type = type_entry.type;
+            entry.index = type_entry.index.value() + null_run_offset;
+            entry.debug = std::format(
+                "[{}.{}.{}]",
                 type_entry.interface_name,
                 type_entry.message_name,
                 type_entry.arg_name);
+            types_array_entries.push_back(std::move(entry));
+        }
+    }
 
-            o_l += std::format("{} {}", info_comment, type_entry.type);
+    {
+        std::optional<size_t> max_index_size;
+        for (auto &e : types_array_entries) {
+            size_t index_size = std::formatted_size("{}", e.index);
+            max_index_size =
+                std::max(max_index_size.value_or(index_size), index_size);
         }
 
-        o_l.leftPad("    ");
-        return o_l;
-    }();
+        for (auto &e : types_array_entries) {
+            e.debug = std::format(
+                "[{:{}}]{}", e.index, max_index_size.value(), e.debug);
+        }
+    };
 
     auto types_array_entries_reversed =
-        std::views::reverse(types_array_entries.get());
+        std::views::reverse(types_array_entries);
     bool first = true;
     for (auto &e : types_array_entries_reversed) {
         if (!first) {
-            e = std::format("{},", e);
+            e.type = std::format("{},", e.type);
         }
         first = false;
     }
 
-    o += std::move(types_array_entries);
+    std::optional<size_t> max_type_size = [&types_array_entries]() {
+        std::optional<size_t> o_size;
+        for (auto &entry : types_array_entries) {
+            size_t e_size = entry.type.size();
+            o_size = std::max(o_size.value_or(e_size), e_size);
+        }
+        return o_size;
+    }();
+
+    StringList types_array_entry_strings;
+    for (auto &entry : types_array_entries) {
+        types_array_entry_strings += std::format(
+            "{:<{}} /* {} */", entry.type, max_type_size.value(), entry.debug);
+    }
+    types_array_entry_strings.leftPad("    ");
+    o += std::move(types_array_entry_strings);
 
     o += "};";
     return o;
@@ -1599,7 +1631,7 @@ GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
     std::string output;
     for (auto &o_line : lines.get()) {
         output += o_line;
-        output += '\n';
+        output += "\n";
     }
 
     return GenerateHeaderOutput{std::move(output)};
