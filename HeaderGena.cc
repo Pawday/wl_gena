@@ -34,8 +34,6 @@ struct HeaderGenerator
 {
     StringList generate() const;
     StringList emit_object_forward() const;
-    StringList emit_rtti_struct() const;
-    StringList emit_rtti() const;
 
     auto topo_sort_interfaces() const -> std::vector<wl_gena::types::Interface>;
 
@@ -959,9 +957,6 @@ StringList wl_gena::HeaderGenerator::emit_object_forward() const
     return o;
 }
 
-} // namespace wl_gena
-
-namespace {
 namespace rtti {
 
 struct ArgsSignantureVisitor
@@ -1228,34 +1223,42 @@ struct TypeArrayInfo
     std::vector<Entry> array;
 };
 
-struct Protocol
+struct Generator
 {
-    Protocol(const std::vector<wl_gena::types::Interface> &i_interfaces)
+    Generator(const types::Protocol &proto)
+        : _interfaces{make_interfaces(proto)}, _type_array_info{_interfaces}
     {
-        for (auto &iface : i_interfaces) {
+    }
+
+    static std::vector<Interface> make_interfaces(const types::Protocol &proto)
+    {
+        std::vector<Interface> interfaces;
+        for (auto &iface : proto.interfaces) {
             interfaces.emplace_back(iface);
         }
+        return interfaces;
+    };
 
-        _type_array_info = TypeArrayInfo{interfaces};
-    }
-
-    const TypeArrayInfo &type_array_info() const
-    {
-        return _type_array_info.value();
-    }
-
-    std::vector<Interface> interfaces;
+    StringList emit_rtti_struct() const;
+    StringList emit_rtti_interface_struct_members_forward(
+        size_t interface_index) const;
+    StringList emit_rtti() const;
+    StringList emit_rtti_interface_struct_types_member() const;
+    StringList emit_rtti_interface_struct_members(size_t interface_index) const;
 
   private:
-    std::optional<TypeArrayInfo> _type_array_info;
+    std::vector<Interface> _interfaces;
+    TypeArrayInfo _type_array_info;
 };
-} // namespace rtti
 
-StringList
-    emit_rtti_interface_struct_members_forward(const rtti::Interface &interface)
+StringList Generator::emit_rtti_interface_struct_members_forward(
+    size_t iface_index) const
 {
     StringList o;
     o += std::format("// {}", __func__);
+
+    const rtti::Interface &interface = _interfaces.at(iface_index);
+
     o += std::format(
         "static const typename traits::wl_interface_t {}_interface;",
         interface.name);
@@ -1274,9 +1277,8 @@ StringList
 
     return o;
 }
-} // namespace
 
-StringList wl_gena::HeaderGenerator::emit_rtti_struct() const
+StringList Generator::emit_rtti_struct() const
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -1287,9 +1289,9 @@ StringList wl_gena::HeaderGenerator::emit_rtti_struct() const
     o += "    static const typename traits::wl_interface_t *types[];";
     o += "";
     bool first = true;
-    for (auto &interface : _protocol.interfaces) {
+    for (size_t iface_i = 0; iface_i != _interfaces.size(); ++iface_i) {
         auto iface_members =
-            emit_rtti_interface_struct_members_forward(interface);
+            emit_rtti_interface_struct_members_forward(iface_i);
         iface_members.leftPad("    ");
         if (!first) {
             o += "";
@@ -1303,9 +1305,7 @@ StringList wl_gena::HeaderGenerator::emit_rtti_struct() const
     return o;
 }
 
-namespace {
-
-StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
+StringList Generator::emit_rtti_interface_struct_types_member() const
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -1327,7 +1327,7 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
     std::vector<RTTITypeEntry> types_array_entries;
 
     {
-        size_t null_run_length = proto.type_array_info().null_run_length;
+        size_t null_run_length = _type_array_info.null_run_length;
 
         size_t types_array_offset = 0;
         RTTITypeEntry entry;
@@ -1340,13 +1340,11 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
     }
 
     {
-        auto &type_array = proto.type_array_info().array;
-        size_t null_run_offset = proto.type_array_info().null_run_length;
-
-        for (const rtti::TypeArrayInfo::Entry &type_entry : type_array) {
+        for (const TypeArrayInfo::Entry &type_entry : _type_array_info.array) {
             RTTITypeEntry entry;
             entry.type = type_entry.type;
-            entry.index = type_entry.index.value() + null_run_offset;
+            entry.index =
+                type_entry.index.value() + _type_array_info.null_run_length;
             entry.debug = std::format(
                 "[{}.{}.{}]",
                 type_entry.interface_name,
@@ -1401,8 +1399,8 @@ StringList emit_rtti_interface_struct_types_member(const rtti::Protocol &proto)
     return o;
 }
 
-StringList emit_rtti_interface_struct_members(
-    const rtti::Interface &interface, const rtti::TypeArrayInfo &types)
+StringList
+    Generator::emit_rtti_interface_struct_members(size_t iface_index) const
 {
     StringList o;
     o += std::format("// {}", __func__);
@@ -1415,9 +1413,10 @@ StringList emit_rtti_interface_struct_members(
         has_entity = true;
     };
 
+    const rtti::Interface &interface = _interfaces.at(iface_index);
+
     auto emit_rtti_message_elements =
-        [&types,
-         &interface](const std::vector<rtti::Message> &msgs) -> StringList {
+        [&](const std::vector<rtti::Message> &msgs) -> StringList {
         StringList ro;
         if (msgs.empty()) {
             return ro;
@@ -1426,8 +1425,9 @@ StringList emit_rtti_interface_struct_members(
         for (auto &msg : msgs) {
             std::string rtti_ref_offset_str = "/* [null_run_stub] */ 0";
             if (!msg.only_primitives) {
-                size_t offset = types.find_index(interface.name, msg.name);
-                offset += types.null_run_length;
+                size_t offset =
+                    _type_array_info.find_index(interface.name, msg.name);
+                offset += _type_array_info.null_run_length;
                 std::string info_comment =
                     std::format("[{}.{}]", interface.name, msg.name);
                 rtti_ref_offset_str =
@@ -1517,21 +1517,17 @@ StringList emit_rtti_interface_struct_members(
     return o;
 }
 
-} // namespace
-
-StringList wl_gena::HeaderGenerator::emit_rtti() const
+StringList Generator::emit_rtti() const
 {
     StringList o;
     o += std::format("// {}", __func__);
 
-    rtti::Protocol proto{_protocol.interfaces};
-    o += emit_rtti_interface_struct_types_member(proto);
+    o += emit_rtti_interface_struct_types_member();
 
     o += "";
     bool first = true;
-    for (auto &iface : proto.interfaces) {
-        auto iface_members =
-            emit_rtti_interface_struct_members(iface, proto.type_array_info());
+    for (size_t iface_i = 0; iface_i != _interfaces.size(); ++iface_i) {
+        auto iface_members = emit_rtti_interface_struct_members(iface_i);
         if (!first) {
             o += "";
         }
@@ -1541,6 +1537,7 @@ StringList wl_gena::HeaderGenerator::emit_rtti() const
 
     return o;
 }
+} // namespace rtti
 
 StringList wl_gena::HeaderGenerator::generate() const
 {
@@ -1563,8 +1560,9 @@ StringList wl_gena::HeaderGenerator::generate() const
     o += "";
     o += std::format("namespace {} {{", _protocol.name);
 
+    rtti::Generator rtti_gena{_protocol};
     o += "";
-    o += emit_rtti_struct();
+    o += rtti_gena.emit_rtti_struct();
 
     o += "";
 
@@ -1580,7 +1578,7 @@ StringList wl_gena::HeaderGenerator::generate() const
     }
 
     o += "";
-    o += emit_rtti();
+    o += rtti_gena.emit_rtti();
 
     o += std::format("}} // namespace {}", _protocol.name);
 
@@ -1600,8 +1598,6 @@ StringList wl_gena::HeaderGenerator::generate() const
 
     return o;
 };
-
-namespace wl_gena {
 
 GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
 {
