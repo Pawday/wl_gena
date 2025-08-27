@@ -1585,12 +1585,12 @@ StringList wl_gena::HeaderGenerator::generate() const
     o += std::format("}} // namespace {}", _protocol.name);
 
     auto make_empty_if_blank = [](std::string &str) {
-        for (auto c : str) {
-            if (c != ' ') {
-                return;
-            }
+        auto non_space =
+            std::ranges::find_if(str, [](char c) { return c != ' '; });
+        if (non_space != std::end(str)) {
+            return;
         }
-        str = "";
+        str.clear();
     };
 
     std::string output;
