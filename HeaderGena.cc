@@ -2,8 +2,10 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <source_location>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -19,6 +21,13 @@
 #include "StringDG.hh"
 #include "StringList.hh"
 #include "Types.hh"
+
+namespace {
+std::string_view func(std::source_location s = std::source_location::current())
+{
+    return s.function_name();
+}
+} // namespace
 
 namespace wl_gena {
 
@@ -269,7 +278,7 @@ StringList emit_interface_listener_type_event(
     const InterfaceTraits &interface_traits)
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     StringList args;
 
@@ -310,7 +319,7 @@ StringList InterfaceGenerator::emit_interface_event_listener_type() const
     }
 
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
     o += "struct listener_t";
     o += "{";
     bool first = true;
@@ -334,7 +343,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
     StringList o;
     std::string &n = _interface.name;
 
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
     o += std::format(
         "int add_listener({0} *{0}, const listener_t *listener, void *data)",
         n);
@@ -356,7 +365,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
 StringList InterfaceGenerator::emit_interface_ctor() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
     o += std::format(
         "{}_interface(typename {} &core) : _core{{core}}{{}};",
         _interface.name,
@@ -367,7 +376,7 @@ StringList InterfaceGenerator::emit_interface_ctor() const
 StringList wl_gena::InterfaceGenerator::emit_enums() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     bool first = true;
     for (auto &e : _interface.enums) {
@@ -385,7 +394,7 @@ auto wl_gena::InterfaceGenerator::emit_enum(const wl_gena::types::Enum &eenum)
     -> StringList
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     o += std::format("enum class {}_e", eenum.name);
     o += "{";
@@ -520,7 +529,7 @@ StringList RequestGenerator::emit_interface_request_signature_args() const
     using NewID = wl_gena::types::ArgTypes::NewID;
 
     StringList args_strings;
-    args_strings += std::format("// {}", __func__);
+    args_strings += std::format("// {}", func());
 
     struct ArgEmitInfo
     {
@@ -622,7 +631,7 @@ StringList RequestGenerator::emit_interface_request_signature_args() const
 StringList RequestGenerator::emit_interface_request_body() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     std::string first_arg_proxy_id =
         std::format("{}_as_proxy", _first_arg_name);
@@ -735,7 +744,7 @@ StringList RequestGenerator::emit_interface_request_body() const
 StringList RequestGenerator::emit_interface_request() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     if (_new_ids.size() > 1) {
         /*
@@ -788,7 +797,7 @@ StringList RequestGenerator::emit_interface_request() const
 StringList InterfaceGenerator::emit_interface_requests() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     size_t next_req_index = 0;
     for (auto &request : _interface.requests) {
@@ -812,7 +821,7 @@ StringList InterfaceGenerator::emit_interface_requests() const
 StringList wl_gena::InterfaceGenerator::generate() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     {
         InterfaceDependencyViewer deps_view{_interface};
@@ -922,7 +931,7 @@ auto wl_gena::HeaderGenerator::topo_sort_interfaces() const
 StringList wl_gena::HeaderGenerator::emit_object_forward() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     const std::vector<types::Interface> &interfaces = _protocol.interfaces;
 
@@ -1255,7 +1264,7 @@ StringList Generator::emit_rtti_interface_struct_members_forward(
     size_t iface_index) const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     const rtti::Interface &interface = _interfaces.at(iface_index);
 
@@ -1281,7 +1290,7 @@ StringList Generator::emit_rtti_interface_struct_members_forward(
 StringList Generator::emit_rtti_struct() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     o += "template <typename traits>";
     o += "struct rtti";
@@ -1308,7 +1317,7 @@ StringList Generator::emit_rtti_struct() const
 StringList Generator::emit_rtti_interface_struct_types_member() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     std::string sig;
     sig += "const typename traits::wl_interface_t *";
@@ -1403,7 +1412,7 @@ StringList
     Generator::emit_rtti_interface_struct_members(size_t iface_index) const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     bool has_entity = false;
     auto add_sep = [&has_entity, &o]() {
@@ -1520,7 +1529,7 @@ StringList
 StringList Generator::emit_rtti() const
 {
     StringList o;
-    o += std::format("// {}", __func__);
+    o += std::format("// {}", func());
 
     o += emit_rtti_interface_struct_types_member();
 
