@@ -89,6 +89,7 @@ struct InterfaceGenerator
     StringList emit_enums() const;
     static StringList emit_enum(const wl_gena::types::Enum &eenum);
     StringList emit_interface_event_listener_type() const;
+    StringList emit_interface_listener_type_event(size_t event_index) const;
     StringList emit_interface_ctor() const;
     StringList emit_interface_add_listener_member_fn() const;
     StringList emit_interface_requests() const;
@@ -281,22 +282,21 @@ struct TypeToStringVisitor
     const InterfaceTraits &_traits;
 };
 
-namespace {
-StringList emit_interface_listener_type_event(
-    const std::string &iface_typename,
-    const wl_gena::types::Event &ev,
-    const InterfaceTraits &interface_traits)
+StringList InterfaceGenerator::emit_interface_listener_type_event(
+    size_t event_index) const
 {
     StringList o;
     o += std::format("// {}", func());
 
     StringList args;
 
+    types::Event &ev = _interface.events.at(event_index);
+
     args += "void *data";
-    args += std::format("{} *object", iface_typename);
+    args += std::format("{} *object", _interface.name);
     for (auto &arg : ev.args) {
         std::string type_string =
-            std::visit(TypeToStringVisitor{interface_traits}, arg.type);
+            std::visit(TypeToStringVisitor{_traits}, arg.type);
         args += std::format("{} {}", type_string, arg.name);
     }
 
@@ -319,7 +319,6 @@ StringList emit_interface_listener_type_event(
 
     return o;
 }
-} // namespace
 
 StringList InterfaceGenerator::emit_interface_event_listener_type() const
 {
@@ -332,13 +331,12 @@ StringList InterfaceGenerator::emit_interface_event_listener_type() const
     o += "struct listener_t";
     o += "{";
     bool first = true;
-    for (auto &event : _interface.events) {
+    for (size_t event_i = 0; event_i != _interface.events.size(); ++event_i) {
         if (!first) {
             o += "";
         }
         first = false;
-        auto typedef_str =
-            emit_interface_listener_type_event(_interface.name, event, _traits);
+        auto typedef_str = emit_interface_listener_type_event(event_i);
         o += indent(typedef_str);
     }
     o += "};";
