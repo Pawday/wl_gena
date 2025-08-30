@@ -1,6 +1,5 @@
 #pragma once
 
-#include <format>
 #include <span>
 #include <string>
 #include <utility>
@@ -19,13 +18,6 @@ struct StringList
             val.emplace_back(std::move(o_line));
         }
         o.val.clear();
-    }
-
-    void leftPad(const std::string &pad)
-    {
-        for (auto &str : val) {
-            str = std::format("{}{}", pad, str);
-        }
     }
 
     bool empty() const

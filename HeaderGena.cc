@@ -27,6 +27,16 @@ std::string_view func(std::source_location s = std::source_location::current())
 {
     return s.function_name();
 }
+
+StringList indent(StringList &in)
+{
+    StringList o;
+    for (const std::string &str : in.get()) {
+        o += std::format("    {}", str);
+    }
+    return o;
+}
+
 } // namespace
 
 namespace wl_gena {
@@ -303,8 +313,7 @@ StringList emit_interface_listener_type_event(
     }
 
     o += std::format("using {}_FN = void(", ev.name);
-    args.leftPad("    ");
-    o += std::move(args);
+    o += indent(args);
     o += ");";
     o += std::format("{}_FN *{} = nullptr;", ev.name, ev.name);
 
@@ -330,8 +339,7 @@ StringList InterfaceGenerator::emit_interface_event_listener_type() const
         first = false;
         auto typedef_str =
             emit_interface_listener_type_event(_interface.name, event, _traits);
-        typedef_str.leftPad("    ");
-        o += std::move(typedef_str);
+        o += indent(typedef_str);
     }
     o += "};";
 
@@ -355,8 +363,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
         b += std::format("    (void (**)(void))listener,");
         b += std::format("    data");
         b += std::format(");");
-        b.leftPad("    ");
-        o += std::move(b);
+        o += indent(b);
     }
     o += "}";
     return o;
@@ -436,8 +443,7 @@ auto wl_gena::InterfaceGenerator::emit_enum(const wl_gena::types::Enum &eenum)
         s = std::format("{},", s);
     }
 
-    es.leftPad("    ");
-    o += std::move(es);
+    o += indent(es);
     o += "};";
 
     return o;
@@ -724,8 +730,7 @@ StringList RequestGenerator::emit_interface_request_body() const
         first = false;
     }
 
-    args.leftPad("    ");
-    o += std::move(args);
+    o += indent(args);
     o += ");";
 
     if (_return_type && !_return_type.value().arg.interface_name.has_value()) {
@@ -777,18 +782,15 @@ StringList RequestGenerator::emit_interface_request() const
         }
     }
 
-    auto signature_args = emit_interface_request_signature_args();
-    signature_args.leftPad("    ");
-
     o += std::format("{} {}(", return_type_string, _request.name);
-    o += std::move(signature_args);
+    auto signature_args = emit_interface_request_signature_args();
+    o += indent(signature_args);
     o += ")";
 
     StringList body = emit_interface_request_body();
 
     o += "{";
-    body.leftPad("    ");
-    o += std::move(body);
+    o += indent(body);
     o += "}";
 
     return o;
@@ -830,9 +832,8 @@ StringList wl_gena::InterfaceGenerator::generate() const
             o += "";
             StringList deps;
             for (auto &dep : enum_deps) {
-                deps += std::format("[{}]", dep);
+                deps += std::format(" * [{}]", dep);
             }
-            deps.leftPad(" * ");
             o += "/*";
             o += " * Dependencies:";
             o += std::move(deps);
@@ -853,37 +854,32 @@ StringList wl_gena::InterfaceGenerator::generate() const
 
     add_sep();
     auto enums = emit_enums();
-    enums.leftPad("    ");
-    o += std::move(enums);
+    o += indent(enums);
 
     bool has_events = !_interface.events.empty();
     if (has_events) {
         add_sep();
 
         StringList type = emit_interface_event_listener_type();
-        type.leftPad("    ");
-        o += std::move(type);
+        o += indent(type);
     }
 
     {
         add_sep();
         StringList ctor = emit_interface_ctor();
-        ctor.leftPad("    ");
-        o += std::move(ctor);
+        o += indent(ctor);
     }
 
     if (has_events) {
         add_sep();
         StringList add_listener_code = emit_interface_add_listener_member_fn();
-        add_listener_code.leftPad("    ");
-        o += std::move(add_listener_code);
+        o += indent(add_listener_code);
     }
 
     {
         add_sep();
         StringList requests = emit_interface_requests();
-        requests.leftPad("    ");
-        o += std::move(requests);
+        o += indent(requests);
     }
 
     add_sep();
@@ -1301,12 +1297,11 @@ StringList Generator::emit_rtti_struct() const
     for (size_t iface_i = 0; iface_i != _interfaces.size(); ++iface_i) {
         auto iface_members =
             emit_rtti_interface_struct_members_forward(iface_i);
-        iface_members.leftPad("    ");
         if (!first) {
             o += "";
         }
         first = false;
-        o += std::move(iface_members);
+        o += indent(iface_members);
     }
 
     o += "};";
@@ -1401,8 +1396,7 @@ StringList Generator::emit_rtti_interface_struct_types_member() const
         types_array_entry_strings += std::format(
             "{:<{}} /* {} */", entry.type, max_type_size.value(), entry.debug);
     }
-    types_array_entry_strings.leftPad("    ");
-    o += std::move(types_array_entry_strings);
+    o += indent(types_array_entry_strings);
 
     o += "};";
     return o;
@@ -1489,8 +1483,7 @@ StringList
             o_memb += "0, nullptr";
         }
 
-        o_memb.leftPad("    ");
-        return o_memb;
+        return indent(o_memb);
     }();
     o += "};";
 
@@ -1504,8 +1497,7 @@ StringList
 
         StringList requests_list =
             emit_rtti_message_elements(interface.requests);
-        requests_list.leftPad("    ");
-        o += std::move(requests_list);
+        o += indent(requests_list);
         o += "};";
     }
 
@@ -1518,8 +1510,7 @@ StringList
             interface.name);
 
         StringList requests_list = emit_rtti_message_elements(interface.events);
-        requests_list.leftPad("    ");
-        o += std::move(requests_list);
+        o += indent(requests_list);
         o += "};";
     }
 
