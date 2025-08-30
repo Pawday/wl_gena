@@ -44,7 +44,7 @@ namespace wl_gena {
 struct InterfaceTraits
 {
     std::string typename_string;
-    std::string wayland_client_core_functions_typename;
+    std::string wayland_client_library_typename;
     std::string wayland_client_core_wl_interface_typename;
     std::string wayland_client_core_wl_message_typename;
 };
@@ -77,8 +77,8 @@ struct InterfaceGenerator
         : _interface(interface)
     {
         _traits.typename_string = std::format("{}_traits", _interface.name);
-        _traits.wayland_client_core_functions_typename =
-            std::format("{}::client_core_functions_t", _traits.typename_string);
+        _traits.wayland_client_library_typename =
+            std::format("{}::client_library_t", _traits.typename_string);
         _traits.wayland_client_core_wl_interface_typename =
             std::format("{}::wl_interface_t", _traits.typename_string);
         _traits.wayland_client_core_wl_message_typename =
@@ -90,7 +90,6 @@ struct InterfaceGenerator
     static StringList emit_enum(const wl_gena::types::Enum &eenum);
     StringList emit_interface_event_listener_type() const;
     StringList emit_interface_listener_type_event(size_t event_index) const;
-    StringList emit_interface_ctor() const;
     StringList emit_interface_add_listener_member_fn() const;
     StringList emit_interface_requests() const;
 
@@ -356,7 +355,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
     o += "{";
     {
         StringList b;
-        b += std::format("return _core.wl_proxy_add_listener(");
+        b += std::format("return L.wl_proxy_add_listener(");
         b += std::format("    reinterpret_cast<wl_proxy*>({0}),", n);
         b += std::format("    (void (**)(void))listener,");
         b += std::format("    data");
@@ -364,17 +363,6 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
         o += indent(b);
     }
     o += "}";
-    return o;
-}
-
-StringList InterfaceGenerator::emit_interface_ctor() const
-{
-    StringList o;
-    o += std::format("// {}", func());
-    o += std::format(
-        "{}_interface(typename {} &core) : _core{{core}}{{}};",
-        _interface.name,
-        _traits.wayland_client_core_functions_typename);
     return o;
 }
 
@@ -652,8 +640,7 @@ StringList RequestGenerator::emit_interface_request_body() const
         o += std::format("wl_proxy *{} = nullptr;", output_identifier.value());
     }
 
-    std::string wl_proxy_marshal_flags_call_start =
-        "_core.wl_proxy_marshal_flags(";
+    std::string wl_proxy_marshal_flags_call_start = "L.wl_proxy_marshal_flags(";
     if (output_identifier) {
         wl_proxy_marshal_flags_call_start = std::format(
             "{} = {}",
@@ -683,8 +670,7 @@ StringList RequestGenerator::emit_interface_request_body() const
     if (_return_type && !_return_type.value().arg.interface_name.has_value()) {
         args += "version";
     } else {
-        args +=
-            std::format("_core.wl_proxy_get_version({})", first_arg_proxy_id);
+        args += std::format("L.wl_proxy_get_version({})", first_arg_proxy_id);
     }
 
     bool is_destructor = false;
@@ -862,12 +848,6 @@ StringList wl_gena::InterfaceGenerator::generate() const
         o += indent(type);
     }
 
-    {
-        add_sep();
-        StringList ctor = emit_interface_ctor();
-        o += indent(ctor);
-    }
-
     if (has_events) {
         add_sep();
         StringList add_listener_code = emit_interface_add_listener_member_fn();
@@ -881,10 +861,8 @@ StringList wl_gena::InterfaceGenerator::generate() const
     }
 
     add_sep();
-    o += "private:";
     o += std::format(
-        "    typename {} &_core;",
-        _traits.wayland_client_core_functions_typename);
+        "    typename {} L;", _traits.wayland_client_library_typename);
     o += "};";
 
     return o;
