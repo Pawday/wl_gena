@@ -18,7 +18,6 @@
 #include <cstdlib>
 
 #include "HeaderGena.hh"
-#include "StringDG.hh"
 #include "StringList.hh"
 #include "Types.hh"
 
@@ -54,8 +53,6 @@ struct HeaderGenerator
     StringList generate() const;
     StringList emit_object_forward() const;
 
-    auto topo_sort_interfaces() const -> std::vector<wl_gena::types::Interface>;
-
     types::Protocol &protocol()
     {
         return _protocol;
@@ -73,8 +70,8 @@ struct HeaderGenerator
 
 struct InterfaceGenerator
 {
-    InterfaceGenerator(wl_gena::types::Interface &interface)
-        : _interface(interface)
+    InterfaceGenerator(const wl_gena::types::Interface &interface)
+        : _interface{interface}
     {
         _traits.typename_string = std::format("{}_traits", _interface.name);
         _traits.wayland_client_library_typename =
@@ -99,7 +96,7 @@ struct InterfaceGenerator
     InterfaceGenerator &operator=(InterfaceGenerator &&) = delete;
 
   private:
-    wl_gena::types::Interface &_interface;
+    const wl_gena::types::Interface &_interface;
     InterfaceTraits _traits;
 };
 
@@ -291,7 +288,7 @@ StringList InterfaceGenerator::emit_interface_listener_type_event(
 
     StringList args;
 
-    types::Event &ev = _interface.events.at(event_index);
+    const types::Event &ev = _interface.events.at(event_index);
 
     args += "void *data";
     args += std::format("{} *object", _interface.name);
@@ -350,7 +347,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
     StringList o;
     o += std::format("// {}", func());
 
-    std::string &n = _interface.name;
+    const std::string &n = _interface.name;
 
     std::string first_arg = std::format(
         "{0}<{1}>::handle_t *{0}_handle", n, _traits.typename_string);
@@ -890,38 +887,6 @@ StringList wl_gena::InterfaceGenerator::generate() const
         "    typename {} L;", _traits.wayland_client_library_typename);
     o += "};";
 
-    return o;
-}
-
-auto wl_gena::HeaderGenerator::topo_sort_interfaces() const
-    -> std::vector<wl_gena::types::Interface>
-{
-    std::unordered_map<std::string, wl_gena::types::Interface> ifaces;
-    for (auto &iface : _protocol.interfaces) {
-        ifaces.insert({iface.name, iface});
-    }
-
-    StringDG graph;
-    for (auto &iface : ifaces) {
-        graph.add_node(iface.first);
-    }
-
-    for (auto &iface : ifaces) {
-        // TODO: Deal with different type of dependecies
-        // (all types form a cycles)
-        InterfaceDependencyViewer deps_view{iface.second};
-        auto deps = deps_view.enums();
-        for (auto &dep_name : deps) {
-            graph.add_dependency(dep_name, iface.first);
-        }
-    }
-
-    std::vector<wl_gena::types::Interface> o;
-    auto sorted_names = graph.topo_sorted();
-    for (auto &name : sorted_names) {
-        o.emplace_back(std::move(ifaces.at(name)));
-    }
-    std::ranges::reverse(o);
     return o;
 }
 
@@ -1517,8 +1482,6 @@ StringList Generator::emit_rtti() const
 
 StringList wl_gena::HeaderGenerator::generate() const
 {
-    auto sorted_interfaces = topo_sort_interfaces();
-
     StringList o;
     o += "#pragma once";
     o += "";
@@ -1543,7 +1506,7 @@ StringList wl_gena::HeaderGenerator::generate() const
     o += "";
 
     bool first = true;
-    for (auto &iface : sorted_interfaces) {
+    for (auto &iface : _protocol.interfaces) {
         if (!first) {
             o += "";
         }
