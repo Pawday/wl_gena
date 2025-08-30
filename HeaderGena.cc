@@ -239,7 +239,7 @@ struct TypeToStringVisitor
         std::string enum_name = e.name;
         if (e.interface_name.has_value()) {
             enum_name = std::format(
-                "typename {}_interface<{}>::{}",
+                "typename {}<{}>::{}",
                 e.interface_name.value(),
                 _traits.typename_string,
                 enum_name);
@@ -253,14 +253,16 @@ struct TypeToStringVisitor
     OVERLOAD(NullString, "/* nullptr */ const char *");
 
     std::string object_interface_name(
-        wl_gena::types::InterfaceNameable &iface,
-        const std::string &orig_type_diag)
+        wl_gena::types::InterfaceNameable &iface, const std::string &comment)
     {
         if (!iface.interface_name.has_value()) {
-            return std::format("/* {} */ void*", orig_type_diag);
+            return std::format("/* {} */ void*", comment);
         }
         return std::format(
-            "/* {} */ {} *", orig_type_diag, iface.interface_name.value());
+            "/* {} */ typename {}<{}>::handle_t*",
+            comment,
+            iface.interface_name.value(),
+            _traits.typename_string);
     }
 
     std::string operator()(ArgTypes::Object obj)
@@ -346,17 +348,21 @@ StringList InterfaceGenerator::emit_interface_event_listener_type() const
 StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
 {
     StringList o;
+    o += std::format("// {}", func());
+
     std::string &n = _interface.name;
 
-    o += std::format("// {}", func());
+    std::string first_arg = std::format(
+        "{0}<{1}>::handle_t *{0}_handle", n, _traits.typename_string);
+
     o += std::format(
-        "int add_listener({0} *{0}, const listener_t *listener, void *data)",
-        n);
+        "int add_listener({}, const listener_t *listener, void *data)",
+        first_arg);
     o += "{";
     {
         StringList b;
         b += std::format("return L.wl_proxy_add_listener(");
-        b += std::format("    reinterpret_cast<wl_proxy*>({0}),", n);
+        b += std::format("    reinterpret_cast<wl_proxy*>({0}_handle),", n);
         b += std::format("    (void (**)(void))listener,");
         b += std::format("    data");
         b += std::format(");");
@@ -562,7 +568,11 @@ StringList RequestGenerator::emit_interface_request_signature_args() const
     std::vector<ArgEmitInfo> signature_args;
 
     signature_args.emplace_back(
-        std::format("{} *{}", _interface_name, _first_arg_name));
+        std::format(
+            "{}<{}>::handle_t *{}",
+            _interface_name,
+            _traits.typename_string,
+            _first_arg_name));
 
     for (auto &arg : _request.args) {
         const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
@@ -722,8 +732,9 @@ StringList RequestGenerator::emit_interface_request_body() const
             "return reinterpret_cast<void*>({});", output_identifier.value());
     } else if (_return_type) {
         o += std::format(
-            "return reinterpret_cast<{}*>({});",
+            "return reinterpret_cast<{}<{}>::handle_t*>({});",
             _return_type.value().arg.interface_name.value(),
+            _traits.typename_string,
             output_identifier.value());
     }
 
@@ -761,8 +772,10 @@ StringList RequestGenerator::emit_interface_request() const
         return_type_string = "void *";
         auto &new_id = _return_type.value().arg;
         if (new_id.interface_name.has_value()) {
-            return_type_string =
-                std::format("{}*", new_id.interface_name.value());
+            return_type_string = std::format(
+                "{}<{}>::handle_t *",
+                new_id.interface_name.value(),
+                _traits.typename_string);
         }
     }
 
@@ -826,7 +839,7 @@ StringList wl_gena::InterfaceGenerator::generate() const
     }
 
     o += std::format("template <typename {}>", _traits.typename_string);
-    o += std::format("struct {}_interface", _interface.name);
+    o += std::format("struct {}", _interface.name);
     o += "{";
     bool has_structure = false;
     auto add_sep = [&has_structure, &o]() {
@@ -835,6 +848,18 @@ StringList wl_gena::InterfaceGenerator::generate() const
         }
         has_structure = true;
     };
+
+    add_sep();
+    StringList handle_def;
+    if (_interface.name == "wl_display") {
+        handle_def +=
+            "// Special case for wl_display from client library via traits";
+        handle_def += std::format(
+            "using handle_t = {}::wl_display_t;", _traits.typename_string);
+    } else {
+        handle_def += "struct handle_t;";
+    }
+    o += indent(handle_def);
 
     add_sep();
     auto enums = emit_enums();
@@ -905,34 +930,9 @@ StringList wl_gena::HeaderGenerator::emit_object_forward() const
     StringList o;
     o += std::format("// {}", func());
 
-    const std::vector<types::Interface> &interfaces = _protocol.interfaces;
-
-    std::unordered_set<std::string> emited;
-
-    std::unordered_set<std::string> emit_object_forward;
-    for (auto &iface : interfaces) {
-        emited.insert(iface.name);
-        o += std::format("struct {};", iface.name);
-    }
-
-    for (auto &iface : interfaces) {
-        InterfaceDependencyViewer dep_view{iface};
-        auto deps = dep_view.enums();
-
-        for (auto &emited_el : emited) {
-            deps.erase(emited_el);
-        }
-
-        if (deps.empty()) {
-            continue;
-        }
-
-        o += "";
-        o += std::format("// deps for {}", iface.name);
-        for (auto &dep : deps) {
-            o += std::format("struct {};", dep);
-            emited.insert(dep);
-        }
+    for (auto &iface : _protocol.interfaces) {
+        o += std::format(
+            "template <typename {0}_traits> struct {0};", iface.name);
     }
 
     return o;
@@ -1531,10 +1531,10 @@ StringList wl_gena::HeaderGenerator::generate() const
     o += "struct wl_proxy;";
 
     o += "";
-    o += emit_object_forward();
+    o += std::format("namespace {} {{", _protocol.name);
 
     o += "";
-    o += std::format("namespace {} {{", _protocol.name);
+    o += emit_object_forward();
 
     rtti::Generator rtti_gena{_protocol};
     o += "";
