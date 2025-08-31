@@ -6,6 +6,7 @@
 #include <iterator>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -35,12 +36,6 @@ struct JsonModeArgs
 auto parse_json_mode_args(std::vector<std::string> args)
     -> std::expected<JsonModeArgs, std::string>
 {
-    auto json_flag_it = std::ranges::find(args, "--json");
-    if (json_flag_it == std::end(args)) {
-        return std::unexpected("No --json flag");
-    }
-    args.erase(json_flag_it);
-
     if (args.empty()) {
         return std::unexpected("Expected <protocol_file> argument");
     }
@@ -116,12 +111,6 @@ auto parse_header_mode_args(std::vector<std::string> args)
     -> std::expected<HeaderModeArgs, std::string>
 {
     HeaderModeArgs out{};
-
-    auto flag_it = std::ranges::find(args, "--header");
-    if (flag_it == std::end(args)) {
-        return std::unexpected("No --header flag");
-    }
-    args.erase(flag_it);
 
     std::string syntax_message;
     syntax_message += "<protocol_file> <output_file> [--includes "
@@ -222,31 +211,58 @@ void process_header_mode(const HeaderModeArgs &args)
 
 } // namespace
 
-int wl_gena_main(const std::vector<std::string> argv)
+void wl_gena::main(const std::vector<std::string> &argv)
 {
-    std::vector<std::string> failue_msgs;
-
-    auto json_mode_args_op = parse_json_mode_args(argv);
-    if (json_mode_args_op) {
-        process_json_mode(json_mode_args_op.value());
-        return EXIT_SUCCESS;
+    std::vector<std::string> argv_loc{argv};
+    if (argv_loc.empty()) {
+        throw std::runtime_error{"Expected arguments"};
     }
-    std::string json_mode_message =
-        std::format("JSON Mode: [{}]", json_mode_args_op.error());
-    failue_msgs.emplace_back(std::move(json_mode_message));
+    std::string mode_str = argv_loc.at(0);
+    argv_loc.erase(argv_loc.begin());
 
-    auto header_mode_args_op = parse_header_mode_args(argv);
-    if (header_mode_args_op) {
-        process_header_mode(header_mode_args_op.value());
-        return EXIT_SUCCESS;
-    }
-    std::string header_mode_message =
-        std::format("HEADER Mode: [{}]", header_mode_args_op.error());
-    failue_msgs.emplace_back(std::move(header_mode_message));
+    std::vector<std::string> all_modes;
 
-    std::cout << "Failue:" << '\n';
-    for (auto &msg : failue_msgs) {
-        std::cout << msg << '\n';
+    all_modes.push_back("json");
+    if (mode_str == all_modes.back()) {
+        auto json_mode_args_op = parse_json_mode_args(argv_loc);
+        if (json_mode_args_op) {
+            process_json_mode(json_mode_args_op.value());
+            return;
+        }
+
+        std::string json_mode_message =
+            std::format("JSON Mode: [{}]", json_mode_args_op.error());
+        throw std::runtime_error{std::move(json_mode_message)};
     }
-    return EXIT_FAILURE;
+
+    all_modes.push_back("header");
+    if (mode_str == all_modes.back()) {
+        auto header_mode_args_op = parse_header_mode_args(argv_loc);
+        if (header_mode_args_op) {
+            process_header_mode(header_mode_args_op.value());
+            return;
+        }
+        std::string header_mode_message =
+            std::format("HEADER Mode: [{}]", header_mode_args_op.error());
+        throw std::runtime_error{std::move(header_mode_message)};
+    }
+
+    std::string available_modes = [&all_modes]() {
+        std::string o;
+        o += '[';
+        bool f = true;
+        for (auto &mode : all_modes) {
+            if (!f) {
+                o += ", ";
+            }
+            f = false;
+            o += std::format("[{}]", mode);
+        }
+        o += ']';
+        return o;
+    }();
+
+    std::string msg = std::format(
+        "Unknown mode [{}]: available modes {}", mode_str, available_modes);
+    throw std::runtime_error{std::move(msg)};
 }

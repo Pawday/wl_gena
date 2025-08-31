@@ -1,3 +1,4 @@
+#include <exception>
 #include <format>
 #include <iostream>
 #include <string>
@@ -8,7 +9,7 @@
 #include "wl_gena/GenaMain.hh"
 
 int main(int argc, char **argv)
-{
+try {
     if (argc < 1) {
         std::cerr << std::format("WTF, argc({}) < 1", argc) << '\n';
         return EXIT_FAILURE;
@@ -20,5 +21,9 @@ int main(int argc, char **argv)
         argv_vec.emplace_back(argv[arg_idx]);
     }
 
-    return wl_gena_main(argv_vec);
+    wl_gena::main(argv_vec);
+
+} catch (std::exception &e) {
+    std::cerr << e.what() << '\n';
+    return EXIT_FAILURE;
 }

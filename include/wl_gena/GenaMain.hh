@@ -3,4 +3,8 @@
 #include <string>
 #include <vector>
 
-int wl_gena_main(const std::vector<std::string> argv);
+namespace wl_gena {
+
+void main(const std::vector<std::string> &argv);
+
+}
