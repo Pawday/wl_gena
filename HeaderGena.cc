@@ -3,6 +3,7 @@
 #include <optional>
 #include <ranges>
 #include <source_location>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -49,15 +50,87 @@ struct InterfaceTraits
     std::string wayland_client_core_wl_message_typename;
 };
 
+struct NamespaceInfo
+{
+    NamespaceInfo(
+        const std::span<const types::Protocol> protos,
+        std::optional<std::string> top_namespace)
+        : _interface_protocol_map{[&protos]() {
+              std::unordered_map<std::string, std::string> o;
+              for (const types::Protocol &proto : protos) {
+                  const std::string proto_name = proto.name;
+                  for (const types::Interface &iface : proto.interfaces) {
+                      if (o.contains(iface.name)) {
+                          std::string protocol_with_same_interface =
+                              o.at(iface.name);
+                          std::string message = std::format(
+                              "Found multiple definition of inteface [{}] "
+                              "defined in [{}] and [{}]:"
+                              "protocol resolution would not be possible",
+                              iface.name,
+                              proto_name,
+                              protocol_with_same_interface);
+                          throw std::runtime_error{std::move(message)};
+                      }
+                      o[iface.name] = proto_name;
+                  }
+              }
+              return o;
+          }()},
+          _top_namespace{std::move(top_namespace)}
+    {
+    }
+
+    std::string get_namespace(const std::string &interface_name) const
+    {
+        std::optional<std::string> proto_name_op =
+            protocol_by_interface(interface_name);
+        if (!proto_name_op.has_value()) {
+            std::string msg = std::format(
+                "Cannot resolve protocol for [{}] interface", interface_name);
+            throw std::runtime_error{std::move(msg)};
+        }
+        const std::string proto_name = proto_name_op.value();
+
+        std::string upstream_namespace;
+        if (_top_namespace) {
+            upstream_namespace = std::format("::{}", _top_namespace.value());
+        }
+
+        return std::format("{}::{}", upstream_namespace, proto_name);
+    };
+
+    const std::optional<std::string> &top_namespace() const
+    {
+        return _top_namespace;
+    }
+
+  private:
+    std::optional<std::string>
+        protocol_by_interface(const std::string &interface) const
+    {
+        std::optional<std::string> o;
+        auto it = _interface_protocol_map.find(interface);
+        if (it == std::end(_interface_protocol_map)) {
+            return {};
+        }
+        return it->second;
+    }
+
+    std::unordered_map<std::string, std::string> _interface_protocol_map;
+    std::optional<std::string> _top_namespace;
+};
+
 struct HeaderGenerator
 {
+    HeaderGenerator(
+        const types::Protocol &protocol, const NamespaceInfo &ns_info)
+        : _protocol{protocol}, _ns_info{ns_info}
+    {
+    }
+
     StringList generate() const;
     StringList emit_object_forward() const;
-
-    types::Protocol &protocol()
-    {
-        return _protocol;
-    }
 
     std::vector<std::string> &includes()
     {
@@ -65,14 +138,17 @@ struct HeaderGenerator
     }
 
   private:
-    types::Protocol _protocol;
+    const types::Protocol &_protocol;
+    const NamespaceInfo &_ns_info;
     std::vector<std::string> _includes;
 };
 
 struct InterfaceGenerator
 {
-    InterfaceGenerator(const wl_gena::types::Interface &interface)
-        : _interface{interface}
+    InterfaceGenerator(
+        const wl_gena::types::Interface &interface,
+        const NamespaceInfo &ns_info)
+        : _interface{interface}, _ns_info{ns_info}
     {
         _traits.typename_string = std::format("{}_traits", _interface.name);
         _traits.wayland_client_library_typename =
@@ -100,6 +176,7 @@ struct InterfaceGenerator
 
   private:
     const wl_gena::types::Interface &_interface;
+    const NamespaceInfo &_ns_info;
     InterfaceTraits _traits;
 };
 
@@ -114,9 +191,10 @@ struct RequestGenerator
     RequestGenerator(
         const wl_gena::types::Request &request,
         const InterfaceTraits &traits,
+        const NamespaceInfo &ns_info,
         std::string interface_name,
         std::string request_index_name)
-        : _request(request), _traits{traits},
+        : _request{request}, _traits{traits}, _ns_info{ns_info},
           _interface_name{std::move(interface_name)},
           _request_index_name{std::move(request_index_name)},
           _first_arg_name{std::format("{}_ptr", _interface_name)},
@@ -149,6 +227,7 @@ struct RequestGenerator
   private:
     const wl_gena::types::Request &_request;
     const InterfaceTraits &_traits;
+    const NamespaceInfo &_ns_info;
     std::string _interface_name;
     std::string _request_index_name;
 
@@ -181,8 +260,9 @@ struct InterfaceDependencyViewer
 
 struct TypeToStringVisitor
 {
-    explicit TypeToStringVisitor(const InterfaceTraits &traits)
-        : _traits{traits}
+    explicit TypeToStringVisitor(
+        const InterfaceTraits &traits, const NamespaceInfo &ns_info)
+        : _traits{traits}, _ns_info{ns_info}
     {
     }
     /*
@@ -236,15 +316,20 @@ struct TypeToStringVisitor
 
     std::string operator()(ArgTypes::UIntEnum e)
     {
-        std::string enum_name = e.name;
+        std::string enum_typename = e.name;
         if (e.interface_name.has_value()) {
-            enum_name = std::format(
-                "typename {}<{}>::{}",
-                e.interface_name.value(),
-                _traits.typename_string,
-                enum_name);
+
+            const std::string &interface_name = e.interface_name.value();
+            std::string interface_type = std::format(
+                "{}::{}<{}>",
+                _ns_info.get_namespace(interface_name),
+                interface_name,
+                _traits.typename_string);
+
+            enum_typename =
+                std::format("typename {}::{}", interface_type, enum_typename);
         }
-        return std::format("{}_e", enum_name);
+        return std::format("{}_e", enum_typename);
     };
 
     OVERLOAD(Fixed, "/* wl_fixed_t */ int32_t");
@@ -258,11 +343,16 @@ struct TypeToStringVisitor
         if (!iface.interface_name.has_value()) {
             return std::format("/* {} */ void*", comment);
         }
-        return std::format(
-            "/* {} */ typename {}<{}>::handle_t*",
-            comment,
-            iface.interface_name.value(),
+        const std::string &interface_name = iface.interface_name.value();
+
+        std::string interface_type = std::format(
+            "{}::{}<{}>",
+            _ns_info.get_namespace(interface_name),
+            interface_name,
             _traits.typename_string);
+
+        return std::format(
+            "/* {} */ typename {}::handle_t*", comment, interface_type);
     }
 
     std::string operator()(ArgTypes::Object obj)
@@ -281,6 +371,7 @@ struct TypeToStringVisitor
 
   private:
     const InterfaceTraits &_traits;
+    const NamespaceInfo &_ns_info;
 };
 
 StringList InterfaceGenerator::emit_interface_listener_type_event(
@@ -297,7 +388,7 @@ StringList InterfaceGenerator::emit_interface_listener_type_event(
     args += std::format("{} *object", _interface.name);
     for (auto &arg : ev.args) {
         std::string type_string =
-            std::visit(TypeToStringVisitor{_traits}, arg.type);
+            std::visit(TypeToStringVisitor{_traits, _ns_info}, arg.type);
         args += std::format("{} {}", type_string, arg.name);
     }
 
@@ -353,8 +444,11 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
     const std::string &n = _interface.name;
     const std::string &proxy = _traits.wayland_client_core_wl_proxy_typename;
 
-    std::string first_arg = std::format(
-        "{0}<{1}>::handle_t *{0}_handle", n, _traits.typename_string);
+    std::string interface_type = std::format(
+        "{}::{}<{}>", _ns_info.get_namespace(n), n, _traits.typename_string);
+
+    std::string first_arg =
+        std::format("{}::handle_t *{}_handle", interface_type, n);
 
     o += std::format(
         "int add_listener({}, const listener_t *listener, void *data)",
@@ -568,12 +662,14 @@ StringList RequestGenerator::emit_interface_request_signature_args() const
 
     std::vector<ArgEmitInfo> signature_args;
 
+    std::string interface_type = std::format(
+        "{}::{}<{}>",
+        _ns_info.get_namespace(_interface_name),
+        _interface_name,
+        _traits.typename_string);
+
     signature_args.emplace_back(
-        std::format(
-            "{}<{}>::handle_t *{}",
-            _interface_name,
-            _traits.typename_string,
-            _first_arg_name));
+        std::format("{}::handle_t *{}", interface_type, _first_arg_name));
 
     for (auto &arg : _request.args) {
         const NewID *arg_new_id_p = std::get_if<NewID>(&arg.type);
@@ -602,7 +698,7 @@ StringList RequestGenerator::emit_interface_request_signature_args() const
         }
 
         std::string arg_typename =
-            std::visit(TypeToStringVisitor{_traits}, arg.type);
+            std::visit(TypeToStringVisitor{_traits, _ns_info}, arg.type);
         signature_args.emplace_back(
             std::format("{} {}", arg_typename, arg.name));
     }
@@ -673,10 +769,16 @@ StringList RequestGenerator::emit_interface_request_body() const
     if (_return_type) {
         const NewIDArg &return_type = _return_type.value();
         if (return_type.arg.interface_name) {
+            const std::string &interface_name =
+                return_type.arg.interface_name.value();
+
+            std::string rtti_interface_type = std::format(
+                "{}::rtti<{}>",
+                _ns_info.get_namespace(interface_name),
+                _traits.typename_string);
+
             args += std::format(
-                "&rtti<{}>::{}_interface",
-                _traits.typename_string,
-                return_type.arg.interface_name.value());
+                "&{}::{}_interface", rtti_interface_type, interface_name);
         } else {
             args += std::string{_new_id_inteface_name};
         }
@@ -779,10 +881,14 @@ StringList RequestGenerator::emit_interface_request() const
         return_type_string = "void *";
         auto &new_id = _return_type.value().arg;
         if (new_id.interface_name.has_value()) {
-            return_type_string = std::format(
-                "{}<{}>::handle_t *",
-                new_id.interface_name.value(),
+            const std::string &interface_name = new_id.interface_name.value();
+            std::string interface_type = std::format(
+                "{}::{}<{}>",
+                _ns_info.get_namespace(interface_name),
+                interface_name,
                 _traits.typename_string);
+
+            return_type_string = std::format("{}::handle_t *", interface_type);
         }
     }
 
@@ -817,7 +923,7 @@ StringList InterfaceGenerator::emit_interface_requests() const
         o += std::format(
             "static constexpr size_t {} = {};", request_index_name, req_i);
         RequestGenerator req_gen{
-            request, _traits, _interface.name, request_index_name};
+            request, _traits, _ns_info, _interface.name, request_index_name};
         o += req_gen.emit_interface_request();
     }
 
@@ -1052,7 +1158,8 @@ struct TypeArrayInfo
         std::string arg_name;
     };
 
-    TypeArrayInfo(const std::vector<Interface> &interfaces)
+    TypeArrayInfo(
+        const std::vector<Interface> &interfaces, const NamespaceInfo &ns_info)
     {
         auto get_max_null_run = [](const std::vector<Message> &msgs) {
             size_t o = 0;
@@ -1072,10 +1179,11 @@ struct TypeArrayInfo
                 std::max(null_run_length, get_max_null_run(iface.requests));
         }
 
-        array = [&interfaces]() {
+        array = [&interfaces, &ns_info]() {
             auto generate_entries =
-                [](const std::vector<Message> &msgs,
-                   const std::string iface_name) -> std::vector<Entry> {
+                [&ns_info](
+                    const std::vector<Message> &msgs,
+                    const std::string iface_name) -> std::vector<Entry> {
                 std::vector<Entry> o;
 
                 for (auto &msg : msgs) {
@@ -1087,9 +1195,13 @@ struct TypeArrayInfo
 
                         std::string type = "nullptr";
                         if (arg.rtti_type) {
+                            const std::string &interface_name =
+                                arg.rtti_type.value();
+
                             type = std::format(
-                                "&rtti<traits>::{}_interface",
-                                arg.rtti_type.value());
+                                "&{}::rtti<traits>::{}_interface",
+                                ns_info.get_namespace(interface_name),
+                                interface_name);
                         }
 
                         Entry entry{};
@@ -1181,8 +1293,9 @@ struct TypeArrayInfo
 
 struct Generator
 {
-    Generator(const types::Protocol &proto)
-        : _interfaces{make_interfaces(proto)}, _type_array_info{_interfaces}
+    Generator(const types::Protocol &proto, const NamespaceInfo &deps)
+        : _deps{deps}, _interfaces{make_interfaces(proto)},
+          _type_array_info{_interfaces, _deps}
     {
     }
 
@@ -1203,6 +1316,7 @@ struct Generator
     StringList emit_rtti_interface_struct_members(size_t interface_index) const;
 
   private:
+    const NamespaceInfo &_deps;
     std::vector<Interface> _interfaces;
     TypeArrayInfo _type_array_info;
 };
@@ -1499,15 +1613,16 @@ StringList wl_gena::HeaderGenerator::generate() const
         o += std::format("#include {}", include_file);
     }
 
-    o += "";
+    if (_ns_info.top_namespace().has_value()) {
+        o += std::format("namespace {} {{", _ns_info.top_namespace().value());
+    }
 
-    o += "";
     o += std::format("namespace {} {{", _protocol.name);
 
     o += "";
     o += emit_object_forward();
 
-    rtti::Generator rtti_gena{_protocol};
+    rtti::Generator rtti_gena{_protocol, _ns_info};
     o += "";
     o += rtti_gena.emit_rtti_struct();
 
@@ -1520,7 +1635,7 @@ StringList wl_gena::HeaderGenerator::generate() const
         }
         first = false;
 
-        InterfaceGenerator iface_gena{iface};
+        InterfaceGenerator iface_gena{iface, _ns_info};
         o += iface_gena.generate();
     }
 
@@ -1528,6 +1643,11 @@ StringList wl_gena::HeaderGenerator::generate() const
     o += rtti_gena.emit_rtti();
 
     o += std::format("}} // namespace {}", _protocol.name);
+
+    if (_ns_info.top_namespace().has_value()) {
+        o +=
+            std::format("}} // namespace {}", _ns_info.top_namespace().value());
+    }
 
     auto make_empty_if_blank = [](std::string &str) {
         auto non_space =
@@ -1548,8 +1668,12 @@ StringList wl_gena::HeaderGenerator::generate() const
 
 GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
 {
-    HeaderGenerator gena;
-    gena.protocol() = I.protocol;
+    auto start = &I.protocol;
+    auto end = start + 1;
+    std::span<const types::Protocol> protos{start, end};
+    NamespaceInfo ns_info{protos, I.top_namespace_id};
+
+    HeaderGenerator gena{I.protocol, ns_info};
     gena.includes() = I.includes;
 
     auto lines = gena.generate();
