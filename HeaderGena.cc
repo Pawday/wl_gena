@@ -44,6 +44,7 @@ struct InterfaceTraits
 {
     std::string typename_string;
     std::string wayland_client_library_typename;
+    std::string wayland_client_core_wl_proxy_typename;
     std::string wayland_client_core_wl_interface_typename;
     std::string wayland_client_core_wl_message_typename;
 };
@@ -78,6 +79,8 @@ struct InterfaceGenerator
             std::format("{}::client_library_t", _traits.typename_string);
         _traits.wayland_client_core_wl_interface_typename =
             std::format("{}::wl_interface_t", _traits.typename_string);
+        _traits.wayland_client_core_wl_proxy_typename =
+            std::format("{}::wl_proxy_t", _traits.typename_string);
         _traits.wayland_client_core_wl_message_typename =
             std::format("{}::wl_message_t", _traits.typename_string);
     }
@@ -348,6 +351,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
     o += std::format("// {}", func());
 
     const std::string &n = _interface.name;
+    const std::string &proxy = _traits.wayland_client_core_wl_proxy_typename;
 
     std::string first_arg = std::format(
         "{0}<{1}>::handle_t *{0}_handle", n, _traits.typename_string);
@@ -359,7 +363,7 @@ StringList InterfaceGenerator::emit_interface_add_listener_member_fn() const
     {
         StringList b;
         b += std::format("return L.wl_proxy_add_listener(");
-        b += std::format("    reinterpret_cast<wl_proxy*>({0}_handle),", n);
+        b += std::format("    reinterpret_cast<{}*>({}_handle),", proxy, n);
         b += std::format("    (void (**)(void))listener,");
         b += std::format("    data");
         b += std::format(");");
@@ -635,16 +639,22 @@ StringList RequestGenerator::emit_interface_request_body() const
     std::string first_arg_proxy_id =
         std::format("{}_as_proxy", _first_arg_name);
     std::string first_arg_proxy;
-    first_arg_proxy += std::format("wl_proxy *{}", first_arg_proxy_id);
-    first_arg_proxy += " = reinterpret_cast<wl_proxy*>(";
-    first_arg_proxy += std::format("{}", _first_arg_name);
-    first_arg_proxy += ");";
+    first_arg_proxy += std::format(
+        "typename {} *{}",
+        _traits.wayland_client_core_wl_proxy_typename,
+        first_arg_proxy_id);
+    first_arg_proxy +=
+        std::format(" = reinterpret_cast<decltype({})>", first_arg_proxy_id);
+    first_arg_proxy += std::format("({});", _first_arg_name);
     o += std::move(first_arg_proxy);
 
     std::optional<std::string> output_identifier;
     if (_return_type.has_value()) {
         output_identifier = std::format("out_{}", _return_type.value().name);
-        o += std::format("wl_proxy *{} = nullptr;", output_identifier.value());
+        o += std::format(
+            "typename {} *{} = nullptr;",
+            _traits.wayland_client_core_wl_proxy_typename,
+            output_identifier.value());
     }
 
     std::string wl_proxy_marshal_flags_call_start = "L.wl_proxy_marshal_flags(";
@@ -1490,8 +1500,6 @@ StringList wl_gena::HeaderGenerator::generate() const
     }
 
     o += "";
-
-    o += "struct wl_proxy;";
 
     o += "";
     o += std::format("namespace {} {{", _protocol.name);
