@@ -238,26 +238,6 @@ struct RequestGenerator
     std::string _new_id_inteface_name;
 };
 
-struct InterfaceDependencyViewer
-{
-    explicit InterfaceDependencyViewer(
-        const wl_gena::types::Interface &interface)
-        : _interface(interface)
-    {
-    }
-
-    auto enums() const -> std::unordered_set<std::string>;
-
-    InterfaceDependencyViewer(const InterfaceDependencyViewer &) = delete;
-    InterfaceDependencyViewer(InterfaceDependencyViewer &&) = delete;
-    InterfaceDependencyViewer &
-        operator=(const InterfaceDependencyViewer &) = delete;
-    InterfaceDependencyViewer &operator=(InterfaceDependencyViewer &&) = delete;
-
-  private:
-    const wl_gena::types::Interface &_interface;
-};
-
 struct TypeToStringVisitor
 {
     explicit TypeToStringVisitor(
@@ -532,87 +512,6 @@ auto wl_gena::InterfaceGenerator::emit_enum(const wl_gena::types::Enum &eenum)
 
     o += indent(es);
     o += "};";
-
-    return o;
-}
-
-namespace {
-
-struct ArgInterfaceDependencyGetterVisitor
-{
-    using ArgTypes = wl_gena::types::ArgTypes;
-    using InterfaceNameable = wl_gena::types::InterfaceNameable;
-
-    std::optional<std::string> from_namable(const InterfaceNameable &n)
-    {
-        return n.interface_name;
-    }
-
-#define OVERLOAD(TYPENAME)                                                     \
-    std::optional<std::string> operator()(const ArgTypes::TYPENAME &)          \
-    {                                                                          \
-        return std::nullopt;                                                   \
-    }
-
-#define OVERLOAD_N(TYPENAME)                                                   \
-    std::optional<std::string> operator()(const ArgTypes::TYPENAME &n)         \
-    {                                                                          \
-        return from_namable(n);                                                \
-    }
-
-    // TODO Deal with different type of dependecies (all types form a cycles)
-    OVERLOAD(Int);
-    OVERLOAD(UInt);
-    OVERLOAD_N(UIntEnum);
-    OVERLOAD(Fixed);
-    OVERLOAD(String);
-    OVERLOAD(NullString);
-    OVERLOAD_N(Object);
-    OVERLOAD_N(NullObject);
-    OVERLOAD_N(NewID);
-    OVERLOAD(Array);
-    OVERLOAD(FD);
-
-#undef OVERLOAD
-#undef OVERLOAD_N
-};
-
-std::optional<std::string> get_arg_interface_dep(const wl_gena::types::Arg &arg)
-{
-    return std::visit(ArgInterfaceDependencyGetterVisitor{}, arg.type);
-}
-} // namespace
-
-auto wl_gena::InterfaceDependencyViewer::enums() const
-    -> std::unordered_set<std::string>
-{
-    std::unordered_set<std::string> o;
-
-    std::vector<wl_gena::types::Message> msgs;
-    for (auto &event : _interface.events) {
-        msgs.push_back(event);
-    }
-
-    for (auto &req : _interface.requests) {
-        msgs.push_back(req);
-    }
-
-    for (auto &msg : msgs) {
-        for (auto &arg : msg.args) {
-
-            using ArgTypes = wl_gena::types::ArgTypes;
-            if (!std::holds_alternative<ArgTypes::UIntEnum>(arg.type)) {
-                continue;
-            }
-
-            std::optional<std::string> dep_iface_name =
-                get_arg_interface_dep(arg);
-            if (!dep_iface_name.has_value()) {
-                continue;
-            }
-            o.insert(dep_iface_name.value());
-        }
-    }
 
     return o;
 }
@@ -934,22 +833,6 @@ StringList wl_gena::InterfaceGenerator::generate() const
 {
     StringList o;
     o += std::format("// {}", func());
-
-    {
-        InterfaceDependencyViewer deps_view{_interface};
-        auto enum_deps = deps_view.enums();
-        if (!enum_deps.empty()) {
-            o += "";
-            StringList deps;
-            for (auto &dep : enum_deps) {
-                deps += std::format(" * [{}]", dep);
-            }
-            o += "/*";
-            o += " * Dependencies:";
-            o += std::move(deps);
-            o += " */";
-        }
-    }
 
     o += std::format("template <typename {}>", _traits.typename_string);
     o += std::format("struct {}", _interface.name);
