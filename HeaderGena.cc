@@ -1510,6 +1510,10 @@ StringList wl_gena::HeaderGenerator::generate() const
         o += std::format("#include {}", include_file);
     }
 
+    if (!_includes.empty()) {
+        o += "";
+    }
+
     if (_ns_info.top_namespace().has_value()) {
         o += std::format("namespace {} {{", _ns_info.top_namespace().value());
     }
