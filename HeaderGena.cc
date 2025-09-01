@@ -379,7 +379,15 @@ StringList InterfaceGenerator::emit_interface_listener_type_event(
     const types::Event &ev = _interface.events.at(event_index);
 
     args += "void *data";
-    args += std::format("{} *object", _interface.name);
+
+    std::string interface_type = std::format(
+        "{}::{}<{}>",
+        _ns_info.get_namespace(_interface.name),
+        _interface.name,
+        _traits.typename_string);
+    std::string handle_type_str = std::format("{}::handle_t", interface_type);
+    args += std::format("{} *handle", handle_type_str);
+
     for (auto &arg : ev.args) {
         std::string type_string =
             std::visit(TypeToStringVisitor{_traits, _ns_info}, arg.type);
