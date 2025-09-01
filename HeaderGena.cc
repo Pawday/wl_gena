@@ -53,25 +53,39 @@ struct InterfaceTraits
 struct NamespaceInfo
 {
     NamespaceInfo(
-        const std::span<const types::Protocol> protos,
+        const types::Protocol &main_protocol,
+        const std::span<const types::Protocol> context_protocols,
         std::optional<std::string> top_namespace)
-        : _interface_protocol_map{[&protos]() {
+        : _interface_protocol_map{[&main_protocol, &context_protocols]() {
               std::unordered_map<std::string, std::string> o;
-              for (const types::Protocol &proto : protos) {
-                  const std::string proto_name = proto.name;
-                  for (const types::Interface &iface : proto.interfaces) {
-                      if (o.contains(iface.name)) {
+
+              auto throw_if_iface_exist =
+                  [&o](
+                      const std::string &iface_name,
+                      const std::string &new_proto_name) {
+                      if (o.contains(iface_name)) {
                           std::string protocol_with_same_interface =
-                              o.at(iface.name);
+                              o.at(iface_name);
                           std::string message = std::format(
                               "Found multiple definition of inteface [{}] "
-                              "defined in [{}] and [{}]:"
-                              "protocol resolution would not be possible",
-                              iface.name,
-                              proto_name,
+                              "defined in [{}] and [{}]. "
+                              "Protocol resolution would not be possible",
+                              iface_name,
+                              new_proto_name,
                               protocol_with_same_interface);
                           throw std::runtime_error{std::move(message)};
                       }
+                  };
+
+              for (const types::Interface &iface : main_protocol.interfaces) {
+                  throw_if_iface_exist(iface.name, main_protocol.name);
+                  o[iface.name] = main_protocol.name;
+              }
+
+              for (const types::Protocol &proto : context_protocols) {
+                  const std::string proto_name = proto.name;
+                  for (const types::Interface &iface : proto.interfaces) {
+                      throw_if_iface_exist(iface.name, proto_name);
                       o[iface.name] = proto_name;
                   }
               }
@@ -1551,10 +1565,7 @@ StringList wl_gena::HeaderGenerator::generate() const
 
 GenerateHeaderOutput generate_header(const GenerateHeaderInput &I)
 {
-    auto start = &I.protocol;
-    auto end = start + 1;
-    std::span<const types::Protocol> protos{start, end};
-    NamespaceInfo ns_info{protos, I.top_namespace_id};
+    NamespaceInfo ns_info{I.protocol, I.context_protocols, I.top_namespace_id};
 
     HeaderGenerator gena{I.protocol, ns_info};
     gena.includes() = I.includes;

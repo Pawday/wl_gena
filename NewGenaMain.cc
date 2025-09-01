@@ -105,6 +105,7 @@ struct HeaderModeArgs
     std::string proto_file_name;
     std::string output_file_name;
     std::vector<std::string> includes;
+    std::vector<std::string> context_protocol_file_names;
 };
 
 auto parse_header_mode_args(std::vector<std::string> args)
@@ -113,8 +114,10 @@ auto parse_header_mode_args(std::vector<std::string> args)
     HeaderModeArgs out{};
 
     std::string syntax_message;
-    syntax_message += "<protocol_file> <output_file> [--includes "
-                      "file[,file_2,/system_file,/system_file_2,...]]";
+    syntax_message +=
+        "<protocol_file> <output_file> "
+        "[--includes file[,file_2,/system_file,/system_file_2,...]] "
+        "[--context_protocols protocol_file[,protocol_file_2,...]]";
 
     auto help_it = std::ranges::find(args, "--help");
     if (help_it != std::end(args)) {
@@ -162,6 +165,35 @@ auto parse_header_mode_args(std::vector<std::string> args)
         out.includes = std::move(includes);
     }
 
+    auto context_protos_it = std::ranges::find(args, "--context_protocols");
+    if (context_protos_it != std::end(args)) {
+        auto context_protos_val_it = context_protos_it + 1;
+        if (context_protos_val_it == std::end(args)) {
+            std::string message =
+                "No value for --context_protocols option was found. ";
+            message += std::format(
+                "Expected arguments with following syntax ({})",
+                syntax_message);
+            return std::unexpected(std::move(message));
+        }
+
+        std::string context_protos_val = *context_protos_val_it;
+        args.erase(context_protos_it, context_protos_val_it + 1);
+
+        std::vector<std::string> context_protocol_file_names;
+        context_protocol_file_names.push_back({});
+        for (char c : context_protos_val) {
+            if (c == ',') {
+                context_protocol_file_names.push_back({});
+                continue;
+            }
+            context_protocol_file_names.back() += c;
+        }
+
+        out.context_protocol_file_names =
+            std::move(context_protocol_file_names);
+    }
+
     if (args.size() != 2) {
         std::string message;
         message += std::format(
@@ -195,14 +227,29 @@ void process_header_mode(const HeaderModeArgs &args)
 
     auto protocol_op = wl_gena::parse_protocol(protocol_xml);
     if (!protocol_op) {
-        std::cerr << protocol_op.error();
-        return;
+        throw std::runtime_error{protocol_op.error()};
     }
     auto protocol = protocol_op.value();
+
+    std::vector<std::string> context_proto_content_list;
+    for (auto &ctx_proto_filename : args.context_protocol_file_names) {
+        std::string ctx_proto_content = read_text_file(ctx_proto_filename);
+        context_proto_content_list.push_back(std::move(ctx_proto_content));
+    }
+
+    std::vector<wl_gena::types::Protocol> context_protocols;
+    for (const std::string &proto_file_content : context_proto_content_list) {
+        auto context_proto_op = wl_gena::parse_protocol(proto_file_content);
+        if (!context_proto_op) {
+            throw std::runtime_error{context_proto_op.error()};
+        }
+        context_protocols.push_back(std::move(context_proto_op.value()));
+    }
 
     wl_gena::GenerateHeaderInput I;
     I.protocol = std::move(protocol);
     I.includes = args.includes;
+    I.context_protocols = std::move(context_protocols);
 
     auto O = generate_header(I);
 
@@ -247,22 +294,9 @@ void wl_gena::main(const std::vector<std::string> &argv)
         throw std::runtime_error{std::move(header_mode_message)};
     }
 
-    std::string available_modes = [&all_modes]() {
-        std::string o;
-        o += '[';
-        bool f = true;
-        for (auto &mode : all_modes) {
-            if (!f) {
-                o += ", ";
-            }
-            f = false;
-            o += std::format("[{}]", mode);
-        }
-        o += ']';
-        return o;
-    }();
-
     std::string msg = std::format(
-        "Unknown mode [{}]: available modes {}", mode_str, available_modes);
+        "Unknown mode [{}]: available modes {}",
+        mode_str,
+        FormatVectorWrap{all_modes});
     throw std::runtime_error{std::move(msg)};
 }
