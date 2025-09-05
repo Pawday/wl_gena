@@ -194,26 +194,15 @@ struct std::formatter<wl_gena::types::Enum> : FormatterNoParseArgs
 template <>
 struct std::formatter<wl_gena::types::Message> : FormatterNoParseArgs
 {
-    template <typename FmtContext>
-    struct MessageTypenameVisitor
-    {
-        FmtContext &_ctx;
-
-        void operator()(const wl_gena::types::Message::TypeDestructor &)
-        {
-            std::format_to(_ctx.out(), "\"type\":\"DESTRUCTOR\"");
-        }
-    };
-
     template <class FmtContext>
     FmtContext::iterator
         format(const wl_gena::types::Message &s, FmtContext &ctx) const
     {
         std::format_to(ctx.out(), "{{");
         std::format_to(ctx.out(), "\"name\":\"{}\"", s.name);
-        if (s.type) {
+        if (s.destructor) {
             std::format_to(ctx.out(), ",");
-            std::visit(MessageTypenameVisitor{ctx}, s.type.value());
+            std::format_to(ctx.out(), "\"type\":\"DESTRUCTOR\"");
         }
         FormatVectorWrap<wl_gena::types::Arg> arg_fmt{s.args};
         std::format_to(ctx.out(), ",");

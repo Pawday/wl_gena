@@ -69,18 +69,10 @@ struct Enum
 
 struct Message
 {
-    // clang-format off
-    struct TypeDestructor {};
-
-    using Type = std::variant<
-        TypeDestructor
-    >;
-    // clang-format on
-
     std::string name;
-    std::optional<Type> type;
     std::vector<Arg> args;
     std::optional<uint32_t> since;
+    bool destructor = false;
 };
 
 // clang-format off

@@ -182,6 +182,7 @@ struct InterfaceGenerator
     StringList emit_interface_listener_type_event(size_t event_index) const;
     StringList emit_interface_add_listener_member_fn() const;
     StringList emit_interface_requests() const;
+    StringList emit_interface_destroy_proxy() const;
 
     InterfaceGenerator(const InterfaceGenerator &) = delete;
     InterfaceGenerator(InterfaceGenerator &&) = delete;
@@ -713,14 +714,7 @@ StringList RequestGenerator::emit_interface_request_body() const
         args += std::format("L.wl_proxy_get_version({})", first_arg_proxy_id);
     }
 
-    bool is_destructor = false;
-    if (_request.type.has_value()) {
-        using Message = wl_gena::types::Message;
-        Message::Type type = _request.type.value();
-        is_destructor = std::get_if<Message::TypeDestructor>(&type) != nullptr;
-    }
-
-    if (is_destructor) {
+    if (_request.destructor) {
         args += "/* WL_MARSHAL_FLAG_DESTROY */ (1 << 0)";
     } else {
         args += "0";
@@ -851,6 +845,60 @@ StringList InterfaceGenerator::emit_interface_requests() const
     return o;
 }
 
+StringList InterfaceGenerator::emit_interface_destroy_proxy() const
+{
+    StringList o;
+    std::optional<std::string> omit_and_why;
+
+    if (omit_and_why) {
+        return o;
+    }
+
+    bool has_destructor = false;
+    bool has_destroy = false;
+    for (auto msg : _interface.requests) {
+        has_destructor = has_destructor || msg.destructor;
+        has_destroy = has_destroy || msg.name == "destroy";
+    }
+
+    if (!has_destructor && has_destroy) {
+        omit_and_why = std::format(
+            "interface [{}] has method named [destroy] but no destructor",
+            _interface.name);
+    }
+
+    if (has_destroy) {
+        omit_and_why = std::format(
+            "interface [{}] has method named [destroy]", _interface.name);
+    }
+
+    if (omit_and_why) {
+        o += "/*";
+        o += " * Destroy via proxy is omitted";
+        o += std::format(" * {}", omit_and_why.value());
+        o += " */";
+        return o;
+    }
+
+    std::string interface_type = std::format(
+        "{}::{}<{}>",
+        _ns_info.get_namespace(_interface.name),
+        _interface.name,
+        _traits.typename_string);
+
+    o +=
+        std::format("void destroy_proxy({}::handle_t *object)", interface_type);
+    o += "{";
+    StringList b;
+    b += std::format(
+        "L.wl_proxy_destroy(reinterpret_cast<{}*>(object));",
+        _traits.wayland_client_core_wl_proxy_typename);
+    o += indent(b);
+    o += "}";
+
+    return o;
+};
+
 StringList wl_gena::InterfaceGenerator::generate() const
 {
     StringList o;
@@ -889,6 +937,14 @@ StringList wl_gena::InterfaceGenerator::generate() const
 
         StringList type = emit_interface_event_listener_type();
         o += indent(type);
+    }
+
+    {
+        auto destroy_via_proxy = emit_interface_destroy_proxy();
+        if (!destroy_via_proxy.empty()) {
+            add_sep();
+            o += indent(destroy_via_proxy);
+        }
     }
 
     if (has_events) {
